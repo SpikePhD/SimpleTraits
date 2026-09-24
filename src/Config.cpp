@@ -52,6 +52,7 @@ namespace ST::Config {
             const auto& j = s_settings.Effective();
             verbose = j["debug"]["verbose"].get<bool>();
             maxLogFiles = j["debug"]["max_log_files"].get<int>();
+            allocationPage = j["debug"]["allocation_page"].get<bool>();
             traits.points.startingPoints = j["points"]["starting_points"].get<int>();
             traits.points.levelsPerPoint = j["points"]["levels_per_point"].get<int>();
             traits.staminaPerPoint = static_cast<float>(Number(j, "per_point", "stamina"));
@@ -111,7 +112,7 @@ namespace ST::Config {
         }
         logger::info("[ST] Config: defaults '{}', user overrides '{}' ({}).",
             report.defaultsPath, report.userPath, report.userFilePresent ? "present" : "absent");
-        logger::info("[ST] Config: verbose={}, max_log_files={}", verbose, maxLogFiles);
+        logger::info("[ST] Config: verbose={}, max_log_files={}, allocation_page={}", verbose, maxLogFiles, allocationPage);
         logger::info("[ST] Config: points - starting_points={}, levels_per_point={}",
             traits.points.startingPoints, traits.points.levelsPerPoint);
         logger::info("[ST] Config: per point - stamina={:.2f}, health={:.2f}, magicka={:.2f}, critical_chance={:.2f}%",

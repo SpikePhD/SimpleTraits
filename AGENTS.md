@@ -33,8 +33,11 @@ is reference only: never edit it from here.
 
 ## Status
 
-Phase 1 (current): scaffold, SAL handshake, config, pure rules. No actor values, game
-settings, cosave, menu or SAL callbacks are touched yet.
+- Phase 1 (done): scaffold, SAL handshake, config, pure rules, diagnostics.
+- Phase 2 (current): cosave, Strength/Resilience/Wisdom bonuses on the permanent modifier
+  layer, and a temporary SKSE Menu Framework debug page for spending points. Agility,
+  Intelligence and Charisma can be allocated but have no effect yet. No SAL callbacks are
+  registered yet.
 
 ## Architecture
 
@@ -45,12 +48,14 @@ SKSEPluginLoad()
 │                                   retention from debug.max_log_files
 ├── Config::LogReport()           - logs config errors/warnings and effective values
 ├── SKSE::Init(.log = false)
+├── TraitState::RegisterSerialization() - cosave 'SMTR' / record 'TRTS' v1
 ├── MessagingInterface (SKSE)
 │   ├── kPostPostLoad             - logs handshake state (SAL broadcasts from its own handler,
 │   │                               which may run before or after ours)
 │   ├── kDataLoaded               - SALBridge::Finalize(): still pending -> Missing;
-│   │                               DiagnosticSinks::Register()
-│   └── kPostLoadGame / kNewGame  - DiagnosticSinks::Reset(): logs and clears session counters
+│   │                               DiagnosticSinks::Register(); DebugPage::Register()
+│   ├── kPostLoadGame             - DiagnosticSinks::Reset(); TraitState::Reconcile()
+│   └── kNewGame                  - DiagnosticSinks::Reset(); TraitState::OnNewGame()
 └── SALBridge::RegisterListener() - listener for sender "SimpleAlternateLevelling";
                                     SKSE refuses it when SAL is not loaded -> Missing
 ```
@@ -71,6 +76,48 @@ tested in game. No SAL callbacks are registered yet.
 `extern/SAL/SAL_API.h` is vendored verbatim; `extern/SAL/README.md` records the SAL commit
 and SHA-256. Update both together, from a committed SAL version only.
 
+### Trait state and bonuses
+
+`TraitState` owns the six allocations and the amount of each actor-value bonus ST has
+applied (`TraitRules::AppliedBonuses`). Both are saved in the cosave; unspent points are
+never stored.
+
+- **Reconcile** (`kPostLoadGame`, after each spend): `TraitRules::PlanReconcile` computes
+  `target = points * per_point` for Stamina (Strength), Health (Resilience) and Magicka
+  (Wisdom), applies `target - applied` with
+  `ModActorValue(ACTOR_VALUE_MODIFIER::kPermanent, ...)` and records `target` as applied.
+  Base values are never written. Running it again changes nothing; a lowered per-point
+  setting removes only ST's own excess. Each change is logged with base/permanent/current
+  before and after.
+- The engine stores the permanent modifier in the main save, so after a load the bonus is
+  already present and the reconcile delta is 0 unless settings changed.
+- **Spend** (`SpendPoint`, main thread): +1 on a trait when `ValidateAllocation` allows it,
+  then reconcile. Refused when no game is loaded.
+- New game and revert clear the state without touching actor values.
+
+Known limits: if the cosave is lost while the main save keeps ST's modifiers, ST sees
+"applied 0" and applies the bonus again. Uninstalling ST leaves its modifiers in the save
+(a cleanup option can come later).
+
+### Cosave
+
+- Unique ID `SMTR`, record `TRTS`, version 1 (`TraitSave`, pure codec, portable tests).
+- Payload, little-endian: `uint32 allocation[6]`, `uint32 count` (max 8), then `count` x
+  `{ uint32 RE::ActorValue id, float32 applied }`. v1 writes Stamina, Health, Magicka.
+  Entries are keyed by actor value so later bonuses (CriticalChance) extend the whitelist
+  without a new layout.
+- Rejected: other versions, wrong lengths, allocations above `kMaxPointsPerTrait`, ids
+  outside the whitelist, duplicate ids, non-finite amounts. The first valid record wins; a
+  missing or rejected record means no allocations and nothing applied.
+
+### Debug page (temporary)
+
+With `debug.allocation_page=true` and SKSE Menu Framework installed, "Simple Traits /
+Debug" shows level, earned/spent/unspent, each trait's points and applied bonus, and a +1
+button per trait. Rendering may run off the main thread: the page reads
+`TraitState::GetSnapshot()` (mutex-guarded) and queues spending with
+`SKSE::GetTaskInterface()->AddTask`. It goes away when the real allocation menu exists.
+
 ### Key files
 
 | File | Role |
@@ -79,6 +126,10 @@ and SHA-256. Update both together, from a committed SAL version only.
 | `src/Config.cpp` / `include/Config.h` | Reads both JSON files next to the DLL, fills `Config::traits` |
 | `src/SettingsModel.cpp` / `include/SettingsModel.h` | Fixed registry with bounds and built-in defaults, layering, schema version, per-value validation |
 | `src/TraitRules.cpp` / `include/TraitRules.h` | Pure rules: points, allocation validation, bonuses, reconcile delta, Intelligence multiplier, barter adjustment |
+| `src/TraitSave.cpp` / `include/TraitSave.h` | Pure cosave codec: encode, decode with validation, first-valid adoption |
+| `src/TraitState.cpp` / `include/TraitState.h` | Allocations and applied bonuses, cosave callbacks, reconcile, spend, snapshots |
+| `src/DebugPage.cpp` / `include/DebugPage.h` | Temporary SKSE Menu Framework page for spending points |
+| `extern/SKSEMenuFramework/SKSEMenuFramework.h` | Vendored MIT header (via SAL `751ebcd`, upstream `aa8effa`); runtime-resolved, no link dependency |
 | `src/HandshakeRules.cpp` / `include/HandshakeRules.h` | Pure SAL interface message validation |
 | `src/SALBridge.cpp` / `include/SALBridge.h` | SAL listener, handshake state, received interface |
 | `src/DiagnosticSinks.cpp` / `include/DiagnosticSinks.h` | Log-only sinks: `CriticalHit::Event` (player crits at info with CriticalChance current/permanent/base and weapon CRDT; others at debug) and a `TESHitEvent` counter of player weapon swings, split into normal and power attacks, for the observed crit rates (totals logged on the first swing, every 10 swings, and on load/new game). An enchanted weapon raises two hit events per swing (the enchantment's has no attack flags); events for the same target and weapon within 100 ms merge into one swing |
@@ -87,7 +138,7 @@ and SHA-256. Update both together, from a committed SAL version only.
 | `extern/SAL/SAL_API.h` | Vendored SAL consumer header (C types and function pointers only) |
 | `data/SKSE/Plugins/SimpleTraits.json` | Shipped defaults, packaged verbatim |
 
-`TraitRules`, `HandshakeRules` and `LogPolicy` must not include CommonLib; they are built
+`TraitRules`, `TraitSave`, `HandshakeRules` and `LogPolicy` must not include CommonLib; they are built
 by the portable tests on any OS.
 
 ### Config
@@ -107,6 +158,7 @@ by the portable tests on any OS.
 |---|---|---|---|
 | `debug.verbose` | bool | | false |
 | `debug.max_log_files` | int | 0-1000 (0 keeps all) | 10 |
+| `debug.allocation_page` | bool | | false (temporary debug page for spending points) |
 | `points.starting_points` | int | 0-100 | 4 |
 | `points.levels_per_point` | int | 1-100 | 3 |
 | `per_point.stamina` / `health` / `magicka` | number | 0-100 | 5 |
@@ -150,6 +202,17 @@ No settings page yet.
   level (buy x m, sell x 1/m). Each value is floored at 1.0 (sell never exceeds buy); a
   value already below 1.0 is left unchanged. Always compute from the captured original
   values, never from the currently written ones.
+
+## Deferred in-game checks (run before release)
+
+Phase 2 was verified in game on 2026-09-24 (spend, save, reload after restart, reload in
+session: no double bonus, base values untouched). Still to run at the end of development:
+
+- Change `per_point.health` in the user JSON, restart, load: only ST's part of Health
+  changes (`applied 5.00 -> 10.00`), everything else `unchanged`.
+- Load a save made before Phase 2: no trait record, nothing applied, no errors.
+- Load a save with an allocation after deleting its `.skse` cosave: documents the known
+  double-apply limit.
 
 ## Build
 

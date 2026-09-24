@@ -5,7 +5,9 @@
   "debug": {
     "verbose": false,
     "max_log_files": 10,
+    "allocation_page": false,
     "_comment_verbose": "Set true to enable trace logging.",
+    "_comment_allocation_page": "Set true to show a temporary Simple Traits / Debug page in SKSE Menu Framework for spending trait points. Testing only.",
     "_comment_max_log_files": "Maximum number of session logs to keep in the standard SKSE log directory (0 keeps all; valid range 0-1000)."
   },
 

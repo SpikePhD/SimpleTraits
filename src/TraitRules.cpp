@@ -99,6 +99,71 @@ namespace ST::TraitRules {
         return target - applied;
     }
 
+    std::string_view BonusName(Bonus bonus) noexcept
+    {
+        switch (bonus) {
+            case Bonus::kStamina: return "Stamina";
+            case Bonus::kHealth: return "Health";
+            case Bonus::kMagicka: return "Magicka";
+        }
+        return "unknown";
+    }
+
+    Trait BonusTrait(Bonus bonus) noexcept
+    {
+        switch (bonus) {
+            case Bonus::kStamina: return Trait::kStrength;
+            case Bonus::kHealth: return Trait::kResilience;
+            case Bonus::kMagicka: return Trait::kWisdom;
+        }
+        return Trait::kStrength;
+    }
+
+    std::uint32_t BonusActorValueId(Bonus bonus) noexcept
+    {
+        switch (bonus) {
+            case Bonus::kStamina: return 26;
+            case Bonus::kHealth: return 24;
+            case Bonus::kMagicka: return 25;
+        }
+        return 0;
+    }
+
+    std::optional<Bonus> BonusFromActorValueId(std::uint32_t id) noexcept
+    {
+        for (std::size_t i = 0; i < kBonusCount; ++i) {
+            const auto bonus = static_cast<Bonus>(i);
+            if (BonusActorValueId(bonus) == id) {
+                return bonus;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::array<BonusPlan, kBonusCount> PlanReconcile(
+        const Allocation& allocation, const TraitSettings& settings, const AppliedBonuses& applied) noexcept
+    {
+        const auto perPoint = [&settings](Bonus bonus) {
+            switch (bonus) {
+                case Bonus::kStamina: return settings.staminaPerPoint;
+                case Bonus::kHealth: return settings.healthPerPoint;
+                case Bonus::kMagicka: return settings.magickaPerPoint;
+            }
+            return 0.0f;
+        };
+
+        std::array<BonusPlan, kBonusCount> plans{};
+        for (std::size_t i = 0; i < kBonusCount; ++i) {
+            const auto bonus = static_cast<Bonus>(i);
+            const auto points = allocation[static_cast<std::size_t>(BonusTrait(bonus))];
+            const float target = TraitBonus(points, perPoint(bonus));
+            if (const auto delta = ReconcileDelta(target, applied[i])) {
+                plans[i] = { target, *delta, true };
+            }
+        }
+        return plans;
+    }
+
     float IntelligenceThresholdMultiplier(std::uint32_t points, float reductionPerPoint) noexcept
     {
         if (points == 0 || !Positive(reductionPerPoint)) {

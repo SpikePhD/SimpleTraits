@@ -14,6 +14,7 @@ EXPECTED = {
     ("config_version",): 1,
     ("debug", "verbose"): False,
     ("debug", "max_log_files"): 10,
+    ("debug", "allocation_page"): False,
     ("points", "starting_points"): 4,
     ("points", "levels_per_point"): 3,
     ("per_point", "stamina"): 5.0,

@@ -89,6 +89,35 @@ namespace ST::TraitRules {
     // nullopt when either value is non-finite.
     [[nodiscard]] std::optional<float> ReconcileDelta(float target, float applied) noexcept;
 
+    // -------------------------------------------------------------------
+    // Actor-value bonuses applied on the permanent modifier layer.
+    // Strength -> Stamina, Resilience -> Health, Wisdom -> Magicka.
+    // -------------------------------------------------------------------
+    enum class Bonus : std::uint8_t { kStamina, kHealth, kMagicka };
+    inline constexpr std::size_t kBonusCount = 3;
+
+    // Amount of each bonus ST has applied, indexed by Bonus. Persisted in the
+    // cosave so reconciling never double-applies.
+    using AppliedBonuses = std::array<float, kBonusCount>;
+
+    [[nodiscard]] std::string_view BonusName(Bonus bonus) noexcept;
+    [[nodiscard]] Trait            BonusTrait(Bonus bonus) noexcept;
+
+    // RE::ActorValue ids (kHealth 24, kMagicka 25, kStamina 26). Kept numeric
+    // so the cosave codec stays dependency-free; the plugin static_asserts them.
+    [[nodiscard]] std::uint32_t        BonusActorValueId(Bonus bonus) noexcept;
+    [[nodiscard]] std::optional<Bonus> BonusFromActorValueId(std::uint32_t id) noexcept;
+
+    struct BonusPlan {
+        float target{ 0.0f };  // bonus the allocation should give
+        float delta{ 0.0f };   // change to apply: target - applied
+        bool  valid{ false };  // false when applied is non-finite; do not touch
+    };
+
+    // Target and delta per bonus for the given allocation and settings.
+    [[nodiscard]] std::array<BonusPlan, kBonusCount> PlanReconcile(
+        const Allocation& allocation, const TraitSettings& settings, const AppliedBonuses& applied) noexcept;
+
     // Intelligence: multiplier on SAL's XP threshold,
     //   clamp(1 - points * reductionPerPoint, kMinimumThresholdMultiplier, 1).
     // SAL clamps again with its own configurable floor.

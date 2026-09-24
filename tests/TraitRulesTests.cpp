@@ -161,6 +161,56 @@ namespace {
         Check(again.barterMin == ten.barterMin && again.barterMax == ten.barterMax, "deterministic from originals");
     }
 
+    void TestReconcilePlan()
+    {
+        TraitSettings settings{};  // 5 stamina/health/magicka per point
+        // Strength 2, Resilience 1, Agility 3, Intelligence 4, Wisdom 0, Charisma 5.
+        const Allocation allocation{ 2, 1, 3, 4, 0, 5 };
+        const AppliedBonuses none{};
+
+        const auto first = PlanReconcile(allocation, settings, none);
+        const auto stamina = static_cast<std::size_t>(Bonus::kStamina);
+        const auto health = static_cast<std::size_t>(Bonus::kHealth);
+        const auto magicka = static_cast<std::size_t>(Bonus::kMagicka);
+        Check(first[stamina].valid && first[stamina].target == 10.0f && first[stamina].delta == 10.0f,
+            "Strength 2 -> +10 Stamina");
+        Check(first[health].target == 5.0f && first[health].delta == 5.0f, "Resilience 1 -> +5 Health");
+        Check(first[magicka].target == 0.0f && first[magicka].delta == 0.0f, "Wisdom 0 -> no Magicka");
+
+        // Applying the plan and recording the targets makes the next plan a no-op.
+        const AppliedBonuses applied{ first[0].target, first[1].target, first[2].target };
+        const auto second = PlanReconcile(allocation, settings, applied);
+        for (const auto& plan : second) {
+            Check(plan.valid && plan.delta == 0.0f, "reconcile is idempotent");
+        }
+
+        // Lowering a per-point setting removes only ST's own excess.
+        settings.staminaPerPoint = 3.0f;
+        const auto lowered = PlanReconcile(allocation, settings, applied);
+        Check(lowered[stamina].target == 6.0f && lowered[stamina].delta == -4.0f, "lower setting shrinks the bonus");
+        Check(lowered[health].delta == 0.0f, "other bonuses unaffected");
+
+        // A setting of 0 removes exactly what was applied.
+        settings.healthPerPoint = 0.0f;
+        const auto zeroed = PlanReconcile(allocation, settings, applied);
+        Check(zeroed[health].target == 0.0f && zeroed[health].delta == -5.0f, "zero setting removes the bonus");
+
+        // A non-finite recorded amount is never touched.
+        AppliedBonuses corrupt = applied;
+        corrupt[magicka] = std::numeric_limits<float>::quiet_NaN();
+        const auto guarded = PlanReconcile(allocation, TraitSettings{}, corrupt);
+        Check(!guarded[magicka].valid, "non-finite applied amount is not reconciled");
+        Check(guarded[stamina].valid, "other bonuses still reconciled");
+
+        Check(BonusTrait(Bonus::kStamina) == Trait::kStrength, "Stamina comes from Strength");
+        Check(BonusTrait(Bonus::kHealth) == Trait::kResilience, "Health comes from Resilience");
+        Check(BonusTrait(Bonus::kMagicka) == Trait::kWisdom, "Magicka comes from Wisdom");
+        Check(BonusActorValueId(Bonus::kHealth) == 24 && BonusActorValueId(Bonus::kMagicka) == 25 &&
+                  BonusActorValueId(Bonus::kStamina) == 26,
+            "actor value ids match RE::ActorValue");
+        Check(BonusFromActorValueId(25) == Bonus::kMagicka && !BonusFromActorValueId(33), "id lookup and whitelist");
+    }
+
     void TestKeys()
     {
         Check(TraitKey(Trait::kStrength) == "strength", "strength key");
@@ -176,6 +226,7 @@ int main()
     TestBonuses();
     TestIntelligence();
     TestBarter();
+    TestReconcilePlan();
     TestKeys();
     if (failures == 0) {
         std::cout << "All trait-rules tests passed.\n";

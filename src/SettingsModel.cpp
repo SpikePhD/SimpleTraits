@@ -14,6 +14,7 @@ namespace ST {
         constexpr std::array kRegistry{
             SettingDescriptor{ "debug.verbose", SettingKind::Toggle, 0, 1, 0 },
             SettingDescriptor{ "debug.max_log_files", SettingKind::Integer, 0, 1000, 10 },
+            SettingDescriptor{ "debug.allocation_page", SettingKind::Toggle, 0, 1, 0 },
             SettingDescriptor{ "points.starting_points", SettingKind::Integer, 0, 100, 4 },
             SettingDescriptor{ "points.levels_per_point", SettingKind::Integer, 1, 100, 3 },
             SettingDescriptor{ "per_point.stamina", SettingKind::Number, 0, 100, 5 },

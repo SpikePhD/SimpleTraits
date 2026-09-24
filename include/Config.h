@@ -11,6 +11,7 @@ namespace ST::Config {
     // plugin load); defaults match the shipped SimpleTraits.json.
     inline bool                      verbose = false;
     inline int                       maxLogFiles = 10;
+    inline bool                      allocationPage = false;
     inline TraitRules::TraitSettings traits{};
 
     struct LoadReport {

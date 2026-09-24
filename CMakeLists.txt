@@ -53,8 +53,11 @@ if(ST_BUILD_PLUGIN)
         src/Config.cpp
         src/SettingsModel.cpp
         src/TraitRules.cpp
+        src/TraitSave.cpp
+        src/TraitState.cpp
         src/HandshakeRules.cpp
         src/SALBridge.cpp
+        src/DebugPage.cpp
         src/DiagnosticSinks.cpp
         src/LogPolicy.cpp
     )
@@ -95,7 +98,8 @@ if(ST_BUILD_PLUGIN)
     target_precompile_headers(${PROJECT_NAME} PRIVATE include/PCH.h)
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/extern/SAL)
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/SAL
+        ${CMAKE_CURRENT_SOURCE_DIR}/extern/SKSEMenuFramework)
     target_compile_definitions(${PROJECT_NAME} PRIVATE ST_VERSION="${PROJECT_VERSION}")
     target_link_libraries(${PROJECT_NAME}
         PRIVATE
@@ -146,6 +150,15 @@ if(BUILD_TESTS)
     target_compile_features(SimpleTraitsRulesTests PRIVATE cxx_std_23)
     target_include_directories(SimpleTraitsRulesTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
     add_test(NAME trait_rules COMMAND SimpleTraitsRulesTests)
+
+    add_executable(SimpleTraitsSaveTests
+        tests/TraitSaveTests.cpp
+        src/TraitSave.cpp
+        src/TraitRules.cpp
+    )
+    target_compile_features(SimpleTraitsSaveTests PRIVATE cxx_std_23)
+    target_include_directories(SimpleTraitsSaveTests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    add_test(NAME trait_save_codec COMMAND SimpleTraitsSaveTests)
 
     add_executable(SimpleTraitsHandshakeTests
         tests/HandshakeRulesTests.cpp

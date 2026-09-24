@@ -1,8 +1,10 @@
 #include "PCH.h"
 #include "Config.h"
+#include "DebugPage.h"
 #include "DiagnosticSinks.h"
 #include "LogPolicy.h"
 #include "SALBridge.h"
+#include "TraitState.h"
 
 #include <chrono>
 #include <filesystem>
@@ -72,6 +74,19 @@ namespace {
         }
     }
 
+    // Save name carried by kPreLoadGame / kSaveGame (not null-terminated).
+    std::string MessageText(const SKSE::MessagingInterface::Message* msg)
+    {
+        if (!msg->data || msg->dataLen == 0) {
+            return "unknown";
+        }
+        std::string text(static_cast<const char*>(msg->data), msg->dataLen);
+        if (const auto nul = text.find(char{ 0 }); nul != std::string::npos) {
+            text.resize(nul);
+        }
+        return text;
+    }
+
     void OnDataLoaded()
     {
         static bool handled = false;
@@ -93,6 +108,7 @@ namespace {
                 break;
         }
         ST::DiagnosticSinks::Register();
+        ST::DebugPage::Register();
         logger::info("[ST] All systems initialised (SAL {}).", ST::SALBridge::StateName(ST::SALBridge::GetState()));
     }
 }
@@ -134,15 +150,31 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
                 case SKSE::MessagingInterface::kDataLoaded:
                     OnDataLoaded();
                     break;
+                case SKSE::MessagingInterface::kPreLoadGame:
+                    logger::info("[ST] Loading save '{}'.", MessageText(msg));
+                    break;
+                case SKSE::MessagingInterface::kSaveGame:
+                    logger::info("[ST] Saving game '{}'.", MessageText(msg));
+                    break;
                 case SKSE::MessagingInterface::kPostLoadGame:
+                    logger::info("[ST] Save loaded ({}).", msg->data ? "success" : "failed");
+                    ST::DiagnosticSinks::Reset();
+                    // The main save and the cosave are both loaded here.
+                    ST::TraitState::Reconcile("post-load-game");
+                    break;
                 case SKSE::MessagingInterface::kNewGame:
                     ST::DiagnosticSinks::Reset();
+                    ST::TraitState::OnNewGame();
                     break;
                 default:
                     break;
             }
         })) {
         logger::critical("[ST] Failed to register the SKSE messaging listener; plugin load aborted.");
+        return false;
+    }
+
+    if (!ST::TraitState::RegisterSerialization()) {
         return false;
     }
 
