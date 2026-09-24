@@ -27,7 +27,7 @@
     "_comment_stamina_percent": "Strength: fraction of base Stamina added per point (0.05 = 5%; 0-1). Follows the base value, so it grows as base Stamina grows.",
     "_comment_health_percent": "Resilience: fraction of base Health added per point (0.05 = 5%; 0-1).",
     "_comment_magicka_percent": "Wisdom: fraction of base Magicka added per point (0.05 = 5%; 0-1).",
-    "_comment_critical_chance": "Agility: critical hit chance per point, in percent (1.0 = +1%; 0-10).",
+    "_comment_critical_chance": "Agility: critical hit chance per point, in percent (1.0 = +1%; 0-10), for an untempered weapon with a normal critical multiplier. Applied as the CriticalChance actor value (10 per 1% in vanilla).",
     "_comment_intelligence_skill_points": "Intelligence: extra Simple Alternate Levelling skill points per level per point (0.25 = four points give +1 per level; 0-5). Retroactive: counts every level-up so far. Never taken back.",
     "_comment_charisma_price_improvement": "Charisma: fraction the barter price factor drops per point (0.01 = buy about 1% cheaper and sell about 1% dearer; 0-0.05). Selling never pays more than buying costs."
   }

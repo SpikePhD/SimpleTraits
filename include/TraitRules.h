@@ -97,9 +97,10 @@ namespace ST::TraitRules {
     // Strength -> Stamina, Resilience -> Health, Wisdom -> Magicka, each a
     // percentage of the actor value's BASE (never of other modifiers, so
     // the plugin's own bonus cannot compound).
+    // Agility -> CriticalChance, a flat amount: see CriticalChancePerPercent.
     // -------------------------------------------------------------------
-    enum class Bonus : std::uint8_t { kStamina, kHealth, kMagicka };
-    inline constexpr std::size_t kBonusCount = 3;
+    enum class Bonus : std::uint8_t { kStamina, kHealth, kMagicka, kCriticalChance };
+    inline constexpr std::size_t kBonusCount = 4;
 
     // Amount of each bonus ST has applied, indexed by Bonus. Persisted in the
     // cosave so reconciling never double-applies.
@@ -108,13 +109,23 @@ namespace ST::TraitRules {
     [[nodiscard]] std::string_view BonusName(Bonus bonus) noexcept;
     [[nodiscard]] Trait            BonusTrait(Bonus bonus) noexcept;
 
-    // RE::ActorValue ids (kHealth 24, kMagicka 25, kStamina 26). Kept numeric
-    // so the cosave codec stays dependency-free; the plugin static_asserts them.
+    // RE::ActorValue ids (kHealth 24, kMagicka 25, kStamina 26,
+    // kCriticalChance 33). Kept numeric so the cosave codec stays
+    // dependency-free; the plugin static_asserts them.
     [[nodiscard]] std::uint32_t        BonusActorValueId(Bonus bonus) noexcept;
     [[nodiscard]] std::optional<Bonus> BonusFromActorValueId(std::uint32_t id) noexcept;
 
-    // Base actor values, indexed by Bonus.
+    // Base actor values, indexed by Bonus (the CriticalChance entry is unused).
     using BaseValues = std::array<float, kBonusCount>;
+
+    // CriticalChance actor value per 1% crit chance. The engine computes
+    //   crit% = fWeaponConditionCriticalChanceMult * weapon condition
+    //           * CriticalChance * weapon crit mult   (then crit perks)
+    // (confirmed in game; see AGENTS.md), so on an untempered weapon with
+    // crit mult 1.0, 1% needs 1 / fWeaponConditionCriticalChanceMult: 10 in
+    // vanilla (0.1). A non-finite or non-positive setting falls back to 10.
+    inline constexpr float kVanillaCriticalChancePerPercent = 10.0f;
+    [[nodiscard]] float CriticalChancePerPercent(float weaponConditionCriticalChanceMult) noexcept;
 
     struct BonusPlan {
         float target{ 0.0f };  // bonus the allocation should give
@@ -126,9 +137,11 @@ namespace ST::TraitRules {
 
     // Target and delta per bonus for the given allocation, settings and base
     // values. A base changing (level-up attribute choice) moves the target,
-    // so the bonus follows it retroactively.
+    // so the bonus follows it retroactively. Agility's target is
+    // points * critical_chance (%) * criticalChancePerPercent.
     [[nodiscard]] std::array<BonusPlan, kBonusCount> PlanReconcile(const Allocation& allocation,
-        const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied) noexcept;
+        const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied,
+        float criticalChancePerPercent = kVanillaCriticalChancePerPercent) noexcept;
 
     // Intelligence, retroactive: whole SAL skill points still owed,
     //   floor(points * perPoint * (level - 1)) - granted, at least 0,

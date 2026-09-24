@@ -54,7 +54,7 @@ namespace ST::DebugPage {
             return "?";
         }
 
-        // Bonus text for a trait; empty for traits not implemented yet.
+        // What a trait currently gives, for the debug table.
         std::string BonusText(Trait trait, const TraitState::Snapshot& snapshot)
         {
             for (std::size_t i = 0; i < TraitRules::kBonusCount; ++i) {
@@ -62,6 +62,12 @@ namespace ST::DebugPage {
                 if (TraitRules::BonusTrait(bonus) == trait) {
                     return std::format("+{:.1f} {}", snapshot.applied[i], TraitRules::BonusName(bonus));
                 }
+            }
+            if (trait == Trait::kIntelligence) {
+                return std::format("{} skill points granted", snapshot.skillPointsGranted);
+            }
+            if (trait == Trait::kCharisma) {
+                return std::format("price factor x{:.3f}", snapshot.priceFactorScale);
             }
             return {};
         }
@@ -108,7 +114,6 @@ namespace ST::DebugPage {
             const auto snapshot = TraitState::GetSnapshot();
             LogIfOpened(snapshot);
             ImGui::TextColored(kWarnColor, "Temporary debug page. Points are permanent: there is no respec.");
-            ImGui::TextDisabled("Agility, Intelligence and Charisma have no effect yet.");
             ImGui::Spacing();
 
             if (!snapshot.gameActive) {

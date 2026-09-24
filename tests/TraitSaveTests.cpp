@@ -64,9 +64,9 @@ namespace {
 
     void TestRoundTrip()
     {
-        const State state{ { 3, 1, 0, 2, 5, 0 }, { 15.0f, 5.0f, 25.0f }, 7 };
+        const State state{ { 3, 1, 0, 2, 5, 0 }, { 15.0f, 5.0f, 25.0f, 20.0f }, 7 };
         const auto bytes = Encode(state);
-        Check(bytes.size() == kHeaderSize + 3 * kEntrySize, "encoded length is fixed for v2");
+        Check(bytes.size() == kHeaderSize + ST::TraitRules::kBonusCount * kEntrySize, "encoded length is fixed for v2");
         const auto decoded = Decode(kVersion, bytes);
         Check(decoded.Succeeded(), "round trip decodes");
         Check(decoded.state == state, "round trip preserves state");
@@ -89,6 +89,12 @@ namespace {
                   reordered.state.applied[2] == 5.0f,
             "missing entry defaults to 0, others map by actor value id");
         Check(Decode(kVersion, Record(allocation, {})).Succeeded(), "zero entries allowed");
+
+        // A v2 record written before Agility (three entries) still loads.
+        const auto beforeAgility = Decode(kVersion, Record(allocation, { { 26, 5.0f }, { 24, 10.0f }, { 25, 5.5f } }, 6u));
+        Check(beforeAgility.Succeeded() && beforeAgility.state.applied[3] == 0.0f && beforeAgility.state.skillPointsGranted == 6,
+            "record without CriticalChance: nothing applied for it yet");
+        Check(Decode(kVersion, Record(allocation, { { 33, 30.0f } })).state.applied[3] == 30.0f, "CriticalChance entry read");
     }
 
     void TestVersion1()
@@ -137,7 +143,7 @@ namespace {
         atCap[2] = ST::TraitRules::kMaxPointsPerTrait;
         Check(Decode(kVersion, Record(atCap, {})).Succeeded(), "allocation at cap accepted");
 
-        Check(Decode(kVersion, Record(allocation, { { 33, 1.0f } })).status == DecodeStatus::kInvalidData,
+        Check(Decode(kVersion, Record(allocation, { { 99, 1.0f } })).status == DecodeStatus::kInvalidData,
             "actor value outside the whitelist rejected");
         Check(Decode(kVersion, Record(allocation, { { 24, 1.0f }, { 24, 2.0f } })).status == DecodeStatus::kInvalidData,
             "duplicate actor value rejected");

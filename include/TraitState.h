@@ -19,6 +19,7 @@ namespace ST::TraitState {
         TraitRules::Allocation     allocation{};
         TraitRules::AppliedBonuses applied{};
         std::uint32_t              skillPointsGranted{ 0 };
+        float                      priceFactorScale{ 1.0f };  // Charisma, before the 1.0 floor
     };
 
     // Registers the cosave unique ID and save/load/revert callbacks. Call
@@ -37,6 +38,10 @@ namespace ST::TraitState {
     // level only when something changed (for frequent triggers such as the
     // vanilla LevelUp Menu closing after the attribute choice).
     void ReconcileIfActive(std::string_view reason);
+
+    // Call on kDataLoaded: captures the original fBarterMin/fBarterMax (after
+    // every plugin's records are loaded) for Charisma.
+    void CaptureGameSettings();
 
     // Copies the validated settings used for points and bonuses. Call after
     // Config::Load and after every settings change, then reconcile.

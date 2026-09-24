@@ -105,6 +105,7 @@ namespace ST::TraitRules {
             case Bonus::kStamina: return "Stamina";
             case Bonus::kHealth: return "Health";
             case Bonus::kMagicka: return "Magicka";
+            case Bonus::kCriticalChance: return "CriticalChance";
         }
         return "unknown";
     }
@@ -115,6 +116,7 @@ namespace ST::TraitRules {
             case Bonus::kStamina: return Trait::kStrength;
             case Bonus::kHealth: return Trait::kResilience;
             case Bonus::kMagicka: return Trait::kWisdom;
+            case Bonus::kCriticalChance: return Trait::kAgility;
         }
         return Trait::kStrength;
     }
@@ -125,6 +127,7 @@ namespace ST::TraitRules {
             case Bonus::kStamina: return 26;
             case Bonus::kHealth: return 24;
             case Bonus::kMagicka: return 25;
+            case Bonus::kCriticalChance: return 33;
         }
         return 0;
     }
@@ -146,21 +149,39 @@ namespace ST::TraitRules {
             case Bonus::kStamina: return settings.staminaPercent;
             case Bonus::kHealth: return settings.healthPercent;
             case Bonus::kMagicka: return settings.magickaPercent;
+            case Bonus::kCriticalChance: break;  // flat, not a percentage of base
         }
         return 0.0f;
     }
 
+    float CriticalChancePerPercent(float weaponConditionCriticalChanceMult) noexcept
+    {
+        if (!Positive(weaponConditionCriticalChanceMult)) {
+            return kVanillaCriticalChancePerPercent;
+        }
+        return 1.0f / weaponConditionCriticalChanceMult;
+    }
+
     std::array<BonusPlan, kBonusCount> PlanReconcile(const Allocation& allocation,
-        const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied) noexcept
+        const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied,
+        float criticalChancePerPercent) noexcept
     {
         std::array<BonusPlan, kBonusCount> plans{};
         for (std::size_t i = 0; i < kBonusCount; ++i) {
             const auto bonus = static_cast<Bonus>(i);
-            if (!std::isfinite(bases[i])) {
-                continue;  // unusable base: leave the applied bonus untouched
-            }
             const auto points = allocation[static_cast<std::size_t>(BonusTrait(bonus))];
-            const float target = PercentBonus(bases[i], points, BonusPercent(bonus, settings));
+            float target = 0.0f;
+            if (bonus == Bonus::kCriticalChance) {
+                const float perPoint = Positive(settings.criticalChancePerPoint) && Positive(criticalChancePerPercent)
+                    ? settings.criticalChancePerPoint * criticalChancePerPercent
+                    : 0.0f;
+                target = static_cast<float>(static_cast<double>(points) * perPoint);
+            } else {
+                if (!std::isfinite(bases[i])) {
+                    continue;  // unusable base: leave the applied bonus untouched
+                }
+                target = PercentBonus(bases[i], points, BonusPercent(bonus, settings));
+            }
             if (const auto delta = ReconcileDelta(target, applied[i])) {
                 plans[i] = { target, *delta, true };
             }

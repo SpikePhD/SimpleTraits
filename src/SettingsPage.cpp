@@ -182,7 +182,10 @@ namespace ST::SettingsPage {
             if (ImGui::IsItemDeactivatedAfterEdit() && s_editing.contains(id)) {
                 const double edited = s_editing[id];
                 s_editing.erase(id);
-                Commit(descriptor.key, integer ? Json(static_cast<std::int64_t>(std::llround(edited))) : Json(edited));
+                // Six significant digits drop step noise (0.1 + 0.2 style) so
+                // the user file stores 0.03, not 0.030000000000000002.
+                const double tidy = std::stod(std::format("{:.6g}", edited));
+                Commit(descriptor.key, integer ? Json(static_cast<std::int64_t>(std::llround(edited))) : Json(tidy));
             }
             Tooltip(descriptor.key);
         }

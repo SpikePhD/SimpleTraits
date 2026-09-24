@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "TraitSave.h"
 
+#include <algorithm>
 #include <cmath>
 #include <mutex>
 #include <optional>
@@ -13,7 +14,8 @@ namespace ST::TraitState {
     namespace {
         using TraitRules::Bonus;
 
-        static_assert(TraitRules::kBonusCount == 3);
+        static_assert(TraitRules::kBonusCount == 4);
+        static_assert(static_cast<std::uint32_t>(RE::ActorValue::kCriticalChance) == 33);
         static_assert(static_cast<std::uint32_t>(RE::ActorValue::kHealth) == 24);
         static_assert(static_cast<std::uint32_t>(RE::ActorValue::kMagicka) == 25);
         static_assert(static_cast<std::uint32_t>(RE::ActorValue::kStamina) == 26);
@@ -24,6 +26,74 @@ namespace ST::TraitState {
         // Copy of Config::traits, so snapshots from the render thread never
         // read the Config globals the settings page rewrites.
         TraitRules::TraitSettings s_settings{};
+
+        // Charisma: fBarterMin/fBarterMax are global game settings, not saved
+        // per character. The originals are captured once on kDataLoaded; ST
+        // writes ApplyCharisma(originals) and remembers what it wrote, so a
+        // change by another mod is detected and adopted as the new original.
+        std::optional<TraitRules::BarterSettings> s_barterOriginal;
+        std::optional<TraitRules::BarterSettings> s_barterWritten;
+
+        RE::Setting* GameSetting(const char* name)
+        {
+            auto* settings = RE::GameSettingCollection::GetSingleton();
+            auto* setting = settings ? settings->GetSetting(name) : nullptr;
+            return setting && setting->GetType() == RE::Setting::Type::kFloat ? setting : nullptr;
+        }
+
+        std::optional<TraitRules::BarterSettings> ReadBarter()
+        {
+            auto* min = GameSetting("fBarterMin");
+            auto* max = GameSetting("fBarterMax");
+            if (!min || !max) {
+                return std::nullopt;
+            }
+            return TraitRules::BarterSettings{ min->GetFloat(), max->GetFloat() };
+        }
+
+        void WriteBarter(const TraitRules::BarterSettings& values)
+        {
+            if (auto* min = GameSetting("fBarterMin")) min->data.f = values.barterMin;
+            if (auto* max = GameSetting("fBarterMax")) max->data.f = values.barterMax;
+            s_barterWritten = values;
+        }
+
+        float CriticalChancePerPercent()
+        {
+            auto* setting = GameSetting("fWeaponConditionCriticalChanceMult");
+            return TraitRules::CriticalChancePerPercent(setting ? setting->GetFloat() : 0.0f);
+        }
+
+        // Caller holds s_mutex; main thread.
+        void ReconcileBarterLocked(std::string_view reason, bool& changed)
+        {
+            if (!s_barterOriginal) {
+                return;
+            }
+            const auto current = ReadBarter();
+            if (!current) {
+                return;
+            }
+            if (s_barterWritten && (current->barterMin != s_barterWritten->barterMin ||
+                                       current->barterMax != s_barterWritten->barterMax)) {
+                logger::warn("[ST] Charisma: fBarterMin/fBarterMax changed by something else ({:.3f}/{:.3f}); "
+                             "using them as the new originals.", current->barterMin, current->barterMax);
+                s_barterOriginal = current;
+            }
+            const auto charisma = s_state.allocation[static_cast<std::size_t>(TraitRules::Trait::kCharisma)];
+            const auto desired = TraitRules::ApplyCharisma(*s_barterOriginal, charisma, s_settings.charismaPriceImprovement);
+            if (desired.barterMin == current->barterMin && desired.barterMax == current->barterMax) {
+                s_barterWritten = desired;
+                return;
+            }
+            WriteBarter(desired);
+            changed = true;
+            logger::info("[ST] Reconcile ({}): Charisma {} points: fBarterMin {:.3f} -> {:.3f}, fBarterMax {:.3f} -> {:.3f} "
+                         "(originals {:.3f}/{:.3f}; price factor x{:.3f}).",
+                reason, charisma, current->barterMin, desired.barterMin, current->barterMax, desired.barterMax,
+                s_barterOriginal->barterMin, s_barterOriginal->barterMax,
+                s_barterOriginal->barterMax > 0.0f ? desired.barterMax / s_barterOriginal->barterMax : 1.0f);
+        }
 
         RE::ActorValue ToActorValue(Bonus bonus)
         {
@@ -98,8 +168,10 @@ namespace ST::TraitState {
             for (std::size_t i = 0; i < TraitRules::kBonusCount; ++i) {
                 bases[i] = avo->GetBaseActorValue(ToActorValue(static_cast<Bonus>(i)));
             }
-            const auto plans = TraitRules::PlanReconcile(s_state.allocation, s_settings, bases, s_state.applied);
+            const auto plans = TraitRules::PlanReconcile(
+                s_state.allocation, s_settings, bases, s_state.applied, CriticalChancePerPercent());
             bool changed = false;
+            ReconcileBarterLocked(reason, changed);
             for (std::size_t i = 0; i < TraitRules::kBonusCount; ++i) {
                 const auto bonus = static_cast<Bonus>(i);
                 const auto& plan = plans[i];
@@ -201,6 +273,10 @@ namespace ST::TraitState {
             std::lock_guard lock(s_mutex);
             s_state = {};
             s_gameActive = false;
+            // Game settings outlive the save: put the original prices back.
+            if (s_barterOriginal) {
+                WriteBarter(*s_barterOriginal);
+            }
             logger::info("[ST] Cosave: reverted; trait state cleared.");
         }
     }
@@ -242,6 +318,21 @@ namespace ST::TraitState {
         if (s_gameActive) {
             ReconcileLocked(reason, true);
         }
+    }
+
+    void CaptureGameSettings()
+    {
+        std::lock_guard lock(s_mutex);
+        s_barterOriginal = ReadBarter();
+        s_barterWritten = s_barterOriginal;
+        if (s_barterOriginal) {
+            logger::info("[ST] Charisma: original fBarterMin={:.3f}, fBarterMax={:.3f}.",
+                s_barterOriginal->barterMin, s_barterOriginal->barterMax);
+        } else {
+            logger::error("[ST] Charisma: fBarterMin/fBarterMax not found; Charisma has no effect.");
+        }
+        logger::info("[ST] Agility: {:.2f} CriticalChance per 1% crit chance (fWeaponConditionCriticalChanceMult).",
+            CriticalChancePerPercent());
     }
 
     void SetSettings(const TraitRules::TraitSettings& settings)
@@ -314,6 +405,9 @@ namespace ST::TraitState {
         snapshot.allocation = s_state.allocation;
         snapshot.applied = s_state.applied;
         snapshot.skillPointsGranted = s_state.skillPointsGranted;
+        const auto charisma = s_state.allocation[static_cast<std::size_t>(TraitRules::Trait::kCharisma)];
+        snapshot.priceFactorScale = static_cast<float>(
+            std::max(0.0, 1.0 - static_cast<double>(charisma) * std::max(0.0f, s_settings.charismaPriceImprovement)));
         if (s_gameActive) {
             snapshot.level = PlayerLevel();
             snapshot.earned = TraitRules::EarnedPoints(snapshot.level, s_settings.points);

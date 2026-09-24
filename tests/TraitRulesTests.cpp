@@ -197,7 +197,7 @@ namespace {
         Check(first[magicka].target == 0.0f && first[magicka].delta == 0.0f, "Wisdom 0 -> no Magicka");
 
         // Applying the plan and recording the targets makes the next plan a no-op.
-        const AppliedBonuses applied{ first[0].target, first[1].target, first[2].target };
+        const AppliedBonuses applied{ first[0].target, first[1].target, first[2].target, first[3].target };
         for (const auto& plan : PlanReconcile(allocation, settings, bases, applied)) {
             Check(plan.valid && plan.delta == 0.0f, "reconcile is idempotent");
         }
@@ -209,7 +209,7 @@ namespace {
         Check(afterLevelUp[stamina].delta == 0.0f, "unchanged base, unchanged bonus");
 
         // Migration from Phase 2 flat bonuses: applied +5 becomes 5% of base.
-        const AppliedBonuses flat{ 10.0f, 5.0f, 0.0f };
+        const AppliedBonuses flat{ 10.0f, 5.0f, 0.0f, first[3].target };
         const auto migrated = PlanReconcile(allocation, settings, bases, flat);
         Check(Near(migrated[health].delta, 2.5), "flat +5 on base 150 moves to 7.5");
         Check(migrated[stamina].delta == 0.0f, "flat +10 on base 100 equals 10%");
@@ -236,7 +236,33 @@ namespace {
         Check(BonusActorValueId(Bonus::kHealth) == 24 && BonusActorValueId(Bonus::kMagicka) == 25 &&
                   BonusActorValueId(Bonus::kStamina) == 26,
             "actor value ids match RE::ActorValue");
-        Check(BonusFromActorValueId(25) == Bonus::kMagicka && !BonusFromActorValueId(33), "id lookup and whitelist");
+        Check(BonusFromActorValueId(25) == Bonus::kMagicka && !BonusFromActorValueId(99), "id lookup and whitelist");
+
+        // Agility: flat CriticalChance, 10 per 1% in vanilla (0.1 multiplier).
+        const auto crit = static_cast<std::size_t>(Bonus::kCriticalChance);
+        Check(BonusTrait(Bonus::kCriticalChance) == Trait::kAgility, "CriticalChance comes from Agility");
+        Check(BonusActorValueId(Bonus::kCriticalChance) == 33 && BonusFromActorValueId(33) == Bonus::kCriticalChance,
+            "CriticalChance is actor value 33");
+        Check(first[crit].valid && Near(first[crit].target, 30.0), "Agility 3 x 1% x 10 = +30 CriticalChance");
+        Check(Near(PlanReconcile(allocation, TraitSettings{}, bases, none, 20.0f)[crit].target, 60.0),
+            "per-percent amount follows the game setting");
+        TraitSettings doubled{};
+        doubled.criticalChancePerPoint = 2.0f;
+        Check(Near(PlanReconcile(allocation, doubled, bases, applied)[crit].delta, 30.0), "2% per point doubles it");
+        TraitSettings off{};
+        off.criticalChancePerPoint = 0.0f;
+        Check(Near(PlanReconcile(allocation, off, bases, applied)[crit].delta, -30.0), "0% removes exactly the bonus");
+        const BaseValues nanBases{ 100.0f, 150.0f, 100.0f, std::numeric_limits<float>::quiet_NaN() };
+        Check(PlanReconcile(allocation, TraitSettings{}, nanBases, none)[crit].valid, "crit ignores the base value");
+        Check(PlanReconcile(allocation, TraitSettings{}, bases, none, std::numeric_limits<float>::quiet_NaN())[crit].target == 0.0f,
+            "unusable per-percent amount grants nothing");
+
+        Check(CriticalChancePerPercent(0.1f) == 10.0f, "vanilla 0.1 -> 10 per 1%");
+        Check(Near(CriticalChancePerPercent(0.5f), 2.0), "modded 0.5 -> 2 per 1%");
+        Check(CriticalChancePerPercent(0.0f) == kVanillaCriticalChancePerPercent, "zero falls back to vanilla");
+        Check(CriticalChancePerPercent(-1.0f) == kVanillaCriticalChancePerPercent, "negative falls back to vanilla");
+        Check(CriticalChancePerPercent(std::numeric_limits<float>::quiet_NaN()) == kVanillaCriticalChancePerPercent,
+            "NaN falls back to vanilla");
     }
 
     void TestKeys()

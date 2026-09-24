@@ -11,7 +11,7 @@ points on them; each point gives one bonus:
 |---|---|---|---|
 | Strength | +% of base Stamina | `stamina_percent` | 0.05 (5%) |
 | Resilience | +% of base Health | `health_percent` | 0.05 (5%) |
-| Agility | +Critical hit chance (mechanism to decide; see Rule details) | `critical_chance` | 1 (= +1%) |
+| Agility | +Critical hit chance, as the CriticalChance actor value | `critical_chance` | 1 (= +1%) |
 | Intelligence | Extra SAL skill points per level, retroactive (SAL API V3) | `intelligence_skill_points` | 0.25 |
 | Wisdom | +% of base Magicka | `magicka_percent` | 0.05 (5%) |
 | Charisma | Better buy and sell prices (fBarterMin/fBarterMax) | `charisma_price_improvement` | 0.01 per point |
@@ -38,9 +38,12 @@ is reference only: never edit it from here.
   layer, temporary SKSE Menu Framework debug page. Verified in game.
 - Phase 3 (done): trait allocation menu (`ST_TraitMenu.swf`) opened as SAL's
   pre-skill-menu level-up step (SAL API V2). Verified in game.
-- Phase 4 (current): Strength/Resilience/Wisdom as a percentage of the base value;
+- Phase 4 (done): Strength/Resilience/Wisdom as a percentage of the base value;
   Intelligence grants retroactive SAL skill points (SAL API V3); settings page in SKSE
-  Menu Framework; cosave v2. Agility and Charisma can be allocated but have no effect yet.
+  Menu Framework; cosave v2. Verified in game.
+- Phase 5 (done): Agility (CriticalChance actor value) and Charisma (barter game
+  settings). All six traits now have an effect. Verified in game except the items in
+  "Deferred in-game checks".
 
 ## Architecture
 
@@ -57,6 +60,7 @@ SKSEPluginLoad()
 │   ├── kPostPostLoad             - logs handshake state (SAL broadcasts from its own handler,
 │   │                               which may run before or after ours)
 │   ├── kDataLoaded               - SALBridge::Finalize(): still pending -> Missing;
+│   │                               TraitState::CaptureGameSettings() (barter originals);
 │   │                               DiagnosticSinks::Register(); TraitMenu::Register()
 │   │                               (menu + SAL level-up step); SAL skill point bonus
 │   │                               (Intelligence); SettingsPage::Register();
@@ -146,6 +150,17 @@ never stored.
   attribute choice raises it); a lowered percentage removes only ST's own excess; Phase 2
   flat bonuses migrate on the first load. Each change is logged with
   base/permanent/current before and after.
+- **Agility** is reconciled with the others as a flat CriticalChance bonus:
+  `points * critical_chance * (1 / fWeaponConditionCriticalChanceMult)`, the game setting
+  read on every reconcile (10 CriticalChance per 1% in vanilla). The cosave's applied
+  entry for actor value 33 tracks it; records written before Agility simply lack it.
+- **Charisma** changes the global game settings `fBarterMin`/`fBarterMax`, which are not
+  saved per character. `CaptureGameSettings` stores the originals on kDataLoaded. Every
+  reconcile writes `ApplyCharisma(originals, points, charisma_price_improvement)` and
+  remembers the written values; if the current values differ from what ST wrote, another
+  mod changed them, so ST logs a warning and adopts them as the new originals. Revert
+  (main menu, new game, before a load) writes the originals back. The reconcile after
+  `kPostLoadGame` applies the loaded character's Charisma.
 - **Intelligence** (SAL API V3 `RegisterSkillPointBonus`): SAL calls
   `TraitState::TakeSkillPointBonus(level)` exactly once per level-up, after ST's trait menu.
   It returns `floor(points * intelligence_skill_points * (level - 1)) - granted` (at least
@@ -167,8 +182,9 @@ Known limits: if the cosave is lost while the main save keeps ST's modifiers, ST
 - Unique ID `SMTR`, record `TRTS`, version 2 (`TraitSave`, pure codec, portable tests).
 - Payload, little-endian: `uint32 allocation[6]`, `uint32 skillPointsGranted`,
   `uint32 count` (max 8), then `count` x `{ uint32 RE::ActorValue id, float32 applied }`.
-  v2 writes Stamina, Health, Magicka. v1 records (no `skillPointsGranted`) still load.
-  Entries are keyed by actor value so later bonuses (CriticalChance) extend the whitelist
+  v2 writes Stamina, Health, Magicka and CriticalChance (33). v1 records (no
+  `skillPointsGranted`) and v2 records without the CriticalChance entry still load.
+  Entries are keyed by actor value so later bonuses extend the whitelist
   without a new layout.
 - Rejected: other versions, wrong lengths, allocations above `kMaxPointsPerTrait`, ids
   outside the whitelist, duplicate ids, non-finite amounts. The first valid record wins; a
@@ -271,11 +287,9 @@ All of these are editable on the settings page.
   with `setgs fWeaponConditionCriticalChanceMult 1` and CriticalChance 100, 83 of 83
   swings crit, then 27 of 27 after a phase with a lower setting (0 of 23). So in vanilla
   **10 CriticalChance = 1% crit chance** on an untempered weapon with crit mult 1.0;
-  tempering (weapon health above 1.0) and the weapon's crit mult scale it. For Agility,
-  +1% per point means +10 CriticalChance per point (weapon-dependent), or a perk using
-  the Calculate My Critical Hit Chance entry point for an exact percentage. Decide before
-  implementing Agility; the shipped `per_point.critical_chance` comment and bounds follow
-  that decision.
+  tempering (weapon health above 1.0) and the weapon's crit mult scale it. Decided
+  (2026-09-24): Agility adds CriticalChance on the permanent modifier layer, the amount
+  per 1% read from `fWeaponConditionCriticalChanceMult` at runtime.
 - **Charisma.** From UESP Skyrim:Speech:
   `factor = fBarterMax - (fBarterMax - fBarterMin) * min(Speech, 100) / 100`,
   `buy = round(value * buyMod * factor)`, `sell = round(value * sellMod / factor)`,
@@ -295,6 +309,13 @@ session: no double bonus, base values untouched). Still to run at the end of dev
 - Load a save made before Phase 2: no trait record, nothing applied, no errors.
 - Load a save with an allocation after deleting its `.skse` cosave: documents the known
   double-apply limit.
+- Charisma buy price (2026-09-24): with 4 points, moving 0.01 -> 0.05 per point (price
+  factor x0.96 -> x0.80, written correctly) changed a hunting bow's buy price 151 -> 131;
+  UESP's formula predicts ~126. Selling matched (16 -> 19). Re-check with the same
+  merchant and item, closing and reopening the barter menu between settings, to see
+  whether the buy formula differs from UESP's or the first trade differed.
+- Agility crit rate end to end (critical_chance 10 with 1 point -> CriticalChance 100,
+  confirmed via getav; the observed rate should be ~10%).
 
 ## Build
 

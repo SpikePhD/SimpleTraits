@@ -41,8 +41,10 @@ namespace ST::TraitMenu {
                 "Strength", "Resilience", "Agility", "Intelligence", "Wisdom", "Charisma"
             };
             std::array<std::string, TraitRules::kTraitCount> effects{
-                "+{value}% of base Stamina per point", "+{value}% of base Health per point", "",
-                "+{value} skill points per level per point, retroactive", "+{value}% of base Magicka per point", ""
+                "+{value}% of base Stamina per point", "+{value}% of base Health per point",
+                "+{value}% critical hit chance per point",
+                "+{value} skill points per level per point, retroactive", "+{value}% of base Magicka per point",
+                "{value}% better buy and sell prices per point"
             };
         };
         Text s_text;
@@ -76,8 +78,10 @@ namespace ST::TraitMenu {
             }
             translate("$ST_EFFECT_STRENGTH", s_text.effects[0]);
             translate("$ST_EFFECT_RESILIENCE", s_text.effects[1]);
+            translate("$ST_EFFECT_AGILITY", s_text.effects[2]);
             translate("$ST_EFFECT_INTELLIGENCE", s_text.effects[3]);
             translate("$ST_EFFECT_WISDOM", s_text.effects[4]);
+            translate("$ST_EFFECT_CHARISMA", s_text.effects[5]);
         }
 
         // "5", "2.5": per-point values without trailing zeros.
@@ -96,13 +100,14 @@ namespace ST::TraitMenu {
                 case Trait::kStrength: perPoint = Config::traits.staminaPercent * 100.0f; break;
                 case Trait::kResilience: perPoint = Config::traits.healthPercent * 100.0f; break;
                 case Trait::kWisdom: perPoint = Config::traits.magickaPercent * 100.0f; break;
+                case Trait::kAgility: perPoint = Config::traits.criticalChancePerPoint; break;
+                case Trait::kCharisma: perPoint = Config::traits.charismaPriceImprovement * 100.0f; break;
                 case Trait::kIntelligence:
                     if (!SALBridge::HasSkillPointBonus()) {
                         return s_text.inactive;  // needs SAL API V3
                     }
                     perPoint = Config::traits.intelligenceSkillPoints;
                     break;
-                default: return s_text.inactive;  // Agility, Charisma: not implemented yet
             }
             auto text = s_text.effects[trait];
             if (const auto pos = text.find("{value}"); pos != std::string::npos) {

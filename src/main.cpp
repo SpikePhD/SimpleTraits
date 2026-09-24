@@ -98,6 +98,7 @@ namespace {
         }
         handled = true;
         ST::SALBridge::Finalize();
+        ST::TraitState::CaptureGameSettings();
         // SAL is a hard requirement; this only guards a broken install.
         switch (ST::SALBridge::GetState()) {
             case ST::SALBridge::State::kMissing:
