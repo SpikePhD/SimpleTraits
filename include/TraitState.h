@@ -32,9 +32,14 @@ namespace ST::TraitState {
     // layer, and records the new applied amounts.
     void Reconcile(std::string_view reason);
 
-    // Main thread. Adds one point to `trait` when ValidateAllocation allows
-    // it, then reconciles. Returns the validation result, or nullopt when no
-    // game is loaded.
+    // Main thread. Replaces the allocation with `proposed` when
+    // ValidateAllocation allows it (no decreases, never more than unspent),
+    // then reconciles. Returns the validation result, or nullopt when no
+    // game is loaded. `source` names the caller in the log.
+    std::optional<TraitRules::AllocationError> CommitAllocation(
+        const TraitRules::Allocation& proposed, std::string_view source);
+
+    // Main thread. CommitAllocation with one more point on `trait`.
     std::optional<TraitRules::AllocationError> SpendPoint(TraitRules::Trait trait);
 
     [[nodiscard]] Snapshot GetSnapshot();

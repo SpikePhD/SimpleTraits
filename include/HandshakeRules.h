@@ -21,4 +21,9 @@ namespace ST::HandshakeRules {
     // payload holds at least a complete SALInterfaceV1 is accepted.
     [[nodiscard]] InterfaceStatus ClassifyInterfaceMessage(
         std::uint32_t type, const void* data, std::uint32_t dataLen) noexcept;
+
+    // For an accepted message: true when it is a V2 interface (version >= 2,
+    // payload at least sizeof(SALInterfaceV2)) with a non-null
+    // RegisterPreSkillMenuStep. Otherwise ST uses the V1 level-up step.
+    [[nodiscard]] bool HasPreSkillMenuStep(const void* data, std::uint32_t dataLen) noexcept;
 }

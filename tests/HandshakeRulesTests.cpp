@@ -68,6 +68,23 @@ int main()
               InterfaceStatus::kAccepted,
         "later version with appended members accepted");
 
+    // V2: pre-skill-menu step detection, with V1 fallback.
+    Check(!HasPreSkillMenuStep(&api, size), "V1 payload has no pre-step");
+    const auto v2size = static_cast<std::uint32_t>(sizeof(SAL::SALInterfaceV2));
+    SAL::SALInterfaceV2 v2{ ValidInterface(), RegisterStep };
+    v2.v1.version = SAL::kInterfaceVersion2;
+    Check(ClassifyInterfaceMessage(SAL::kMessageInterface, &v2, v2size) == InterfaceStatus::kAccepted,
+        "V2 payload accepted as an interface");
+    Check(HasPreSkillMenuStep(&v2, v2size), "V2 payload has the pre-step");
+    Check(!HasPreSkillMenuStep(&v2, v2size - 1), "truncated V2 payload falls back to V1");
+    Check(!HasPreSkillMenuStep(nullptr, v2size), "null data has no pre-step");
+    auto versionOne = v2;
+    versionOne.v1.version = SAL::kInterfaceVersion1;
+    Check(!HasPreSkillMenuStep(&versionOne, v2size), "version 1 with a larger payload has no pre-step");
+    auto nullStep = v2;
+    nullStep.RegisterPreSkillMenuStep = nullptr;
+    Check(!HasPreSkillMenuStep(&nullStep, v2size), "null pre-step function falls back to V1");
+
     Check(StatusName(InterfaceStatus::kAccepted) == "accepted", "status name");
     Check(std::string_view(SAL::kSenderName) == "SimpleAlternateLevelling", "vendored sender name");
 

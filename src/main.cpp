@@ -4,6 +4,7 @@
 #include "DiagnosticSinks.h"
 #include "LogPolicy.h"
 #include "SALBridge.h"
+#include "TraitMenu.h"
 #include "TraitState.h"
 
 #include <chrono>
@@ -108,6 +109,7 @@ namespace {
                 break;
         }
         ST::DiagnosticSinks::Register();
+        ST::TraitMenu::Register();
         ST::DebugPage::Register();
         logger::info("[ST] All systems initialised (SAL {}).", ST::SALBridge::StateName(ST::SALBridge::GetState()));
     }
@@ -152,6 +154,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
                     break;
                 case SKSE::MessagingInterface::kPreLoadGame:
                     logger::info("[ST] Loading save '{}'.", MessageText(msg));
+                    ST::TraitMenu::ResetState();
                     break;
                 case SKSE::MessagingInterface::kSaveGame:
                     logger::info("[ST] Saving game '{}'.", MessageText(msg));
@@ -163,6 +166,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
                     ST::TraitState::Reconcile("post-load-game");
                     break;
                 case SKSE::MessagingInterface::kNewGame:
+                    ST::TraitMenu::ResetState();
                     ST::DiagnosticSinks::Reset();
                     ST::TraitState::OnNewGame();
                     break;

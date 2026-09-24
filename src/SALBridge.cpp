@@ -9,6 +9,7 @@ namespace ST::SALBridge {
     namespace {
         std::atomic<State>                      s_state{ State::kPending };
         std::atomic<const SAL::SALInterfaceV1*> s_interface{ nullptr };
+        std::atomic<const SAL::SALInterfaceV2*> s_interfaceV2{ nullptr };  // set only for a usable V2
         bool                                    s_finalized{ false };
 
         void OnSALMessage(SKSE::MessagingInterface::Message* msg)
@@ -37,9 +38,13 @@ namespace ST::SALBridge {
 
             const auto* api = static_cast<const SAL::SALInterfaceV1*>(msg->data);
             s_interface = api;
+            const bool v2 = HandshakeRules::HasPreSkillMenuStep(msg->data, msg->dataLen);
+            if (v2) {
+                s_interfaceV2 = static_cast<const SAL::SALInterfaceV2*>(msg->data);
+            }
             s_state = State::kReady;
-            logger::info("[ST] SAL: interface V{} received ({} bytes). No callbacks registered yet.",
-                api->version, msg->dataLen);
+            logger::info("[ST] SAL: interface V{} received ({} bytes); pre-skill-menu step {}.",
+                api->version, msg->dataLen, v2 ? "available" : "unavailable (V1 step fallback)");
         }
     }
 
@@ -100,5 +105,44 @@ namespace ST::SALBridge {
     const SAL::SALInterfaceV1* Interface() noexcept
     {
         return IsAvailable() ? s_interface.load() : nullptr;
+    }
+
+    bool HasPreSkillMenuStep() noexcept
+    {
+        return IsAvailable() && s_interfaceV2.load() != nullptr;
+    }
+
+    bool RegisterLevelUpStep(bool (*wantsStep)(std::uint32_t level))
+    {
+        const auto* api = Interface();
+        if (!api) {
+            logger::warn("[ST] SAL: level-up step not registered; SAL is {}.", StateName(GetState()));
+            return false;
+        }
+        if (const auto* v2 = HasPreSkillMenuStep() ? s_interfaceV2.load() : nullptr) {
+            const bool ok = v2->RegisterPreSkillMenuStep(wantsStep);
+            if (ok) {
+                logger::info("[ST] SAL: pre-skill-menu step registered (trait menu opens before SAL's skill menu).");
+            } else {
+                logger::error("[ST] SAL: pre-skill-menu step rejected by SAL; the trait menu will not open on level-up.");
+            }
+            return ok;
+        }
+        const bool ok = api->RegisterLevelUpStep(wantsStep);
+        if (ok) {
+            logger::info("[ST] SAL: V1 level-up step registered (trait menu opens after SAL's skill menu).");
+        } else {
+            logger::error("[ST] SAL: V1 level-up step rejected by SAL; the trait menu will not open on level-up.");
+        }
+        return ok;
+    }
+
+    void ContinueLevelUp()
+    {
+        if (const auto* api = Interface()) {
+            api->ContinueLevelUp();
+        } else {
+            logger::warn("[ST] SAL: ContinueLevelUp skipped; SAL is {}.", StateName(GetState()));
+        }
     }
 }

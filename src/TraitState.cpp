@@ -220,28 +220,46 @@ namespace ST::TraitState {
         ReconcileLocked(reason);
     }
 
-    std::optional<TraitRules::AllocationError> SpendPoint(TraitRules::Trait trait)
+    std::optional<TraitRules::AllocationError> CommitAllocation(
+        const TraitRules::Allocation& proposed, std::string_view source)
     {
         std::lock_guard lock(s_mutex);
-        const auto index = static_cast<std::size_t>(trait);
-        if (!s_gameActive || index >= TraitRules::kTraitCount) {
-            logger::info("[ST] Spend {}: no game loaded.", TraitRules::TraitKey(trait));
+        if (!s_gameActive) {
+            logger::info("[ST] Commit ({}): no game loaded.", source);
             return std::nullopt;
         }
-        auto proposed = s_state.allocation;
-        ++proposed[index];
         const auto earned = TraitRules::EarnedPoints(PlayerLevel(), Config::traits.points);
         const auto result = TraitRules::ValidateAllocation(s_state.allocation, proposed, earned);
         if (result != TraitRules::AllocationError::kNone) {
-            logger::info("[ST] Spend {}: rejected ({}).", TraitRules::TraitKey(trait),
-                TraitRules::AllocationErrorName(result));
+            logger::warn("[ST] Commit ({}): rejected ({}); kept {}.", source,
+                TraitRules::AllocationErrorName(result), DescribeAllocation(s_state.allocation));
             return result;
         }
-        s_state.allocation = proposed;
-        logger::info("[ST] Spend {}: now {} ({}).", TraitRules::TraitKey(trait), proposed[index],
+        if (proposed == s_state.allocation) {
+            logger::info("[ST] Commit ({}): no change.", source);
+            LogStateLocked(source);
+            return result;
+        }
+        logger::info("[ST] Commit ({}): {} -> {}.", source, DescribeAllocation(s_state.allocation),
             DescribeAllocation(proposed));
-        ReconcileLocked("spend");
+        s_state.allocation = proposed;
+        ReconcileLocked(source);
         return result;
+    }
+
+    std::optional<TraitRules::AllocationError> SpendPoint(TraitRules::Trait trait)
+    {
+        const auto index = static_cast<std::size_t>(trait);
+        if (index >= TraitRules::kTraitCount) {
+            return TraitRules::AllocationError::kExceedsUnspent;
+        }
+        TraitRules::Allocation proposed;
+        {
+            std::lock_guard lock(s_mutex);
+            proposed = s_state.allocation;
+        }
+        ++proposed[index];
+        return CommitAllocation(proposed, std::format("spend {}", TraitRules::TraitKey(trait)));
     }
 
     Snapshot GetSnapshot()

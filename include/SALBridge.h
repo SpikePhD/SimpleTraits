@@ -2,6 +2,7 @@
 
 #include "SAL_API.h"
 
+#include <cstdint>
 #include <string_view>
 
 // Simple Traits side of the SAL handshake (extern/SAL/SAL_API.h).
@@ -31,4 +32,16 @@ namespace ST::SALBridge {
 
     // The received interface in kReady, nullptr otherwise.
     [[nodiscard]] const SAL::SALInterfaceV1* Interface() noexcept;
+
+    // True when SAL offers the V2 pre-skill-menu step.
+    [[nodiscard]] bool HasPreSkillMenuStep() noexcept;
+
+    // Registers ST's level-up step: SAL V2's pre-skill-menu step when
+    // available, otherwise V1's post-skill-menu step. Call on kDataLoaded or
+    // later. Returns false when SAL is unavailable or rejects it.
+    bool RegisterLevelUpStep(bool (*wantsStep)(std::uint32_t level));
+
+    // Resumes SAL's level-up after ST's step. Call exactly once per wait
+    // (TraitMenuRules::ContinuationGuard); SAL does the work on the main thread.
+    void ContinueLevelUp();
 }

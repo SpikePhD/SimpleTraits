@@ -18,6 +18,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dll", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--swf", required=True, type=Path)
+    parser.add_argument("--translation", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--runtime", required=True)
@@ -45,6 +47,8 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output_dir / f"SimpleTraits-{args.version}-Skyrim{args.runtime}.zip"
     entries = {
+        "Interface/ST_TraitMenu.swf": args.swf,
+        "Interface/Translations/SimpleTraits_ENGLISH.txt": args.translation,
         "SKSE/Plugins/SimpleTraits.dll": args.dll,
         "SKSE/Plugins/SimpleTraits.json": args.config,
     }

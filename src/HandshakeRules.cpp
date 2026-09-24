@@ -48,4 +48,13 @@ namespace ST::HandshakeRules {
         }
         return InterfaceStatus::kAccepted;
     }
+
+    bool HasPreSkillMenuStep(const void* data, std::uint32_t dataLen) noexcept
+    {
+        if (!data || dataLen < sizeof(SAL::SALInterfaceV2)) {
+            return false;
+        }
+        const auto* api = static_cast<const SAL::SALInterfaceV2*>(data);
+        return api->v1.version >= SAL::kInterfaceVersion2 && api->RegisterPreSkillMenuStep != nullptr;
+    }
 }
