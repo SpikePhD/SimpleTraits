@@ -1,0 +1,32 @@
+{
+  "_comment": "Simple Traits shipped defaults. Put personal changes in SimpleTraits.user.json (same layout, only the keys you change, plus \"config_version\": 1). Invalid values are ignored one by one.",
+  "config_version": 1,
+
+  "debug": {
+    "verbose": false,
+    "max_log_files": 10,
+    "_comment_verbose": "Set true to enable trace logging.",
+    "_comment_max_log_files": "Maximum number of session logs to keep in the standard SKSE log directory (0 keeps all; valid range 0-1000)."
+  },
+
+  "points": {
+    "starting_points": 4,
+    "levels_per_point": 3,
+    "_comment": "Trait points earned = starting_points + floor(level / levels_per_point). Unspent points carry over. Lowering these never removes points already spent. starting_points 0-100, levels_per_point 1-100."
+  },
+
+  "per_point": {
+    "stamina": 5.0,
+    "health": 5.0,
+    "magicka": 5.0,
+    "critical_chance": 1.0,
+    "intelligence_threshold_reduction": 0.02,
+    "charisma_price_improvement": 0.01,
+    "_comment_stamina": "Strength: Stamina per point (0-100).",
+    "_comment_health": "Resilience: Health per point (0-100).",
+    "_comment_magicka": "Wisdom: Magicka per point (0-100).",
+    "_comment_critical_chance": "Agility: critical hit chance per point, in percent (1.0 = +1%; 0-10).",
+    "_comment_intelligence_threshold_reduction": "Intelligence: fraction of XP needed per level removed per point (0.02 = 2%; 0-0.5). The multiplier never goes below 0.5, and Simple Alternate Levelling applies its own floor too.",
+    "_comment_charisma_price_improvement": "Charisma: fraction the barter price factor drops per point (0.01 = buy about 1% cheaper and sell about 1% dearer; 0-0.05). Selling never pays more than buying costs."
+  }
+}

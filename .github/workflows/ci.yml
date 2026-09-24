@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  portable-tests:
+    name: Portable tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake --preset portable-tests
+      - name: Build
+        run: cmake --build --preset portable-tests
+      - name: Test
+        run: ctest --preset portable-tests
+
+  windows-plugin:
+    name: Windows plugin, tests, and package
+    # CMakePresets.json uses the Visual Studio 17 2022 generator, matching the
+    # release toolchain. windows-latest now ships only Visual Studio 2026.
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select runner vcpkg
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure
+        run: cmake --preset windows-release-tests
+
+      - name: Build
+        run: cmake --build --preset windows-release-tests
+
+      - name: Test
+        run: ctest --preset windows-release-tests
+
+      - name: Read project version
+        shell: pwsh
+        run: |
+          $line = Select-String -Path "out/build/windows-release-tests/CMakeCache.txt" -Pattern "^CMAKE_PROJECT_VERSION:STATIC=(.+)$"
+          if (-not $line) { throw "CMAKE_PROJECT_VERSION not found in CMakeCache.txt." }
+          $version = $line.Matches[0].Groups[1].Value.Trim()
+          "ST_PACKAGE_NAME=SimpleTraits-$version-SkyrimSE-AE" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify runtime metadata and imports
+        shell: pwsh
+        run: |
+          python tools/verify_plugin_metadata.py --dll out/build/windows-release-tests/Release/SimpleTraits.dll
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio/Installer/vswhere.exe"
+          $vs = & $vswhere -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem (Join-Path $vs "VC/Tools/MSVC") -Filter dumpbin.exe -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          $imports = & $dumpbin /DEPENDENTS "out/build/windows-release-tests/Release/SimpleTraits.dll"
+          if ($imports -match "(?i)(spdlog|fmt)\.dll") {
+            throw "Plugin imports a dynamic spdlog or fmt library."
+          }
+
+      - name: Package twice and verify reproducibility
+        shell: pwsh
+        run: |
+          cmake --build --preset windows-package
+          $archive = "Deployed/$env:ST_PACKAGE_NAME.zip"
+          $first = (Get-FileHash $archive -Algorithm SHA256).Hash
+          cmake --build --preset windows-package
+          $second = (Get-FileHash $archive -Algorithm SHA256).Hash
+          if ($first -ne $second) {
+            throw "Deterministic package hash changed between identical builds."
+          }
+          $checksum = Get-Content "$archive.sha256" -Raw
+          $expectedChecksum = "$($second.ToLowerInvariant())  $([IO.Path]::GetFileName($archive))`n"
+          if ($checksum -ne $expectedChecksum) {
+            throw "Package checksum file does not match the archive."
+          }
+          $expectedEntries = @(
+            "SKSE/Plugins/SimpleTraits.dll",
+            "SKSE/Plugins/SimpleTraits.json"
+          )
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Resolve-Path $archive))
+          try { $actualEntries = @($zip.Entries.FullName | Sort-Object) } finally { $zip.Dispose() }
+          if (Compare-Object $expectedEntries $actualEntries) {
+            throw "Package entries do not match the exact mod manifest."
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ST_PACKAGE_NAME }}
+          path: |
+            Deployed/*.zip
+            Deployed/*.sha256
+          if-no-files-found: error

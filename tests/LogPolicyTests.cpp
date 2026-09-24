@@ -1,0 +1,69 @@
+#include "LogPolicy.h"
+
+#include <cmath>
+#include <cstdint>
+#include <iostream>
+#include <optional>
+#include <string_view>
+#include <vector>
+
+namespace {
+    int failures = 0;
+
+    void Check(bool condition, std::string_view message) {
+        if (!condition) {
+            std::cerr << "FAIL: " << message << '\n';
+            ++failures;
+        }
+    }
+
+    void TestValidation() {
+        using ST::LogPolicy::ValidateMaxLogFiles;
+        Check(ValidateMaxLogFiles(std::nullopt) == 10, "missing retention uses default");
+        Check(ValidateMaxLogFiles(0) == 0, "zero means unlimited retention");
+        Check(ValidateMaxLogFiles(1000) == 1000, "upper boundary is accepted");
+        Check(ValidateMaxLogFiles(-1) == 10, "negative retention is rejected");
+        Check(ValidateMaxLogFiles(1001) == 10, "excessive retention is rejected");
+
+        using ST::LogPolicy::ParseMaxLogFiles;
+        Check(ParseMaxLogFiles(20.0) == 20, "menu-written integral double accepted");
+        Check(ParseMaxLogFiles(0.0) == 0, "zero retention accepted");
+        Check(ParseMaxLogFiles(1000.0) == 1000, "upper boundary accepted");
+        Check(!ParseMaxLogFiles(2.5), "fractional retention rejected");
+        Check(!ParseMaxLogFiles(-1.0), "negative retention rejected");
+        Check(!ParseMaxLogFiles(1001.0), "excessive retention rejected");
+        Check(!ParseMaxLogFiles(1e300), "huge value rejected without overflow");
+        Check(!ParseMaxLogFiles(std::nan("")), "NaN rejected");
+    }
+
+    void TestSelection() {
+        using namespace ST::LogPolicy;
+        const std::vector<std::string> names{
+            "SimpleTraits_2026-07-15_10-00-03.log",
+            "SimpleTraits_2026-07-15_10-00-01.log",
+            "unrelated.log",
+            "SimpleTraits_bad.log",
+            "SimpleTraits_2026-07-15_10-00-02.log"
+        };
+
+        Check(IsSessionLogName(names[0]), "valid timestamped filename accepted");
+        Check(!IsSessionLogName(names[2]), "unrelated filename rejected");
+        Check(!IsSessionLogName(names[3]), "malformed plugin filename rejected");
+
+        const auto removed = SelectLogsToDelete(names, 2);
+        Check(removed.size() == 1, "only excess matching logs selected");
+        Check(!removed.empty() && removed[0] == "SimpleTraits_2026-07-15_10-00-01.log",
+            "oldest matching log selected first");
+        Check(SelectLogsToDelete(names, 0).empty(), "zero retention limit deletes nothing");
+        Check(SelectLogsToDelete(names, 3).empty(), "unrelated files do not affect retention");
+    }
+}
+
+int main() {
+    TestValidation();
+    TestSelection();
+    if (failures == 0) {
+        std::cout << "All log-policy tests passed.\n";
+    }
+    return failures == 0 ? 0 : 1;
+}

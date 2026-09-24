@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "simpletraits",
+  "version": "0.1.0",
+  "dependencies": [
+    "directxtk",
+    "nlohmann-json",
+    "rapidcsv",
+    "spdlog",
+    "xbyak"
+  ]
+}

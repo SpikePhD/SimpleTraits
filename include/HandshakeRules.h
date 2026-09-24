@@ -1,0 +1,24 @@
+#pragma once
+
+#include <cstdint>
+#include <string_view>
+
+// Dependency-free validation of SAL's interface message (extern/SAL/SAL_API.h).
+namespace ST::HandshakeRules {
+
+    enum class InterfaceStatus {
+        kAccepted,
+        kWrongMessageType,
+        kNullData,
+        kTooSmall,            // payload shorter than SALInterfaceV1
+        kUnsupportedVersion,  // version < 1
+        kMissingFunction      // a V1 function pointer is null
+    };
+
+    [[nodiscard]] std::string_view StatusName(InterfaceStatus status) noexcept;
+
+    // Later SAL versions only append members, so any version >= 1 whose
+    // payload holds at least a complete SALInterfaceV1 is accepted.
+    [[nodiscard]] InterfaceStatus ClassifyInterfaceMessage(
+        std::uint32_t type, const void* data, std::uint32_t dataLen) noexcept;
+}
