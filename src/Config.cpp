@@ -55,15 +55,58 @@ namespace ST::Config {
             allocationPage = j["debug"]["allocation_page"].get<bool>();
             traits.points.startingPoints = j["points"]["starting_points"].get<int>();
             traits.points.levelsPerPoint = j["points"]["levels_per_point"].get<int>();
-            traits.staminaPerPoint = static_cast<float>(Number(j, "per_point", "stamina"));
-            traits.healthPerPoint = static_cast<float>(Number(j, "per_point", "health"));
-            traits.magickaPerPoint = static_cast<float>(Number(j, "per_point", "magicka"));
+            traits.staminaPercent = static_cast<float>(Number(j, "per_point", "stamina_percent"));
+            traits.healthPercent = static_cast<float>(Number(j, "per_point", "health_percent"));
+            traits.magickaPercent = static_cast<float>(Number(j, "per_point", "magicka_percent"));
             traits.criticalChancePerPoint = static_cast<float>(Number(j, "per_point", "critical_chance"));
-            traits.intelligenceThresholdReduction =
-                static_cast<float>(Number(j, "per_point", "intelligence_threshold_reduction"));
+            traits.intelligenceSkillPoints =
+                static_cast<float>(Number(j, "per_point", "intelligence_skill_points"));
             traits.charismaPriceImprovement =
                 static_cast<float>(Number(j, "per_point", "charisma_price_improvement"));
         }
+    }
+
+    SettingsModel& Settings()
+    {
+        return s_settings;
+    }
+
+    bool SaveAndApply(std::string& error)
+    {
+        const auto userPath = PluginsDir() / "SimpleTraits.user.json";
+        const auto overrides = s_settings.Overrides();
+        std::error_code ec;
+        if (overrides.size() == 1) {  // only config_version: nothing to override
+            std::filesystem::remove(userPath, ec);
+            if (ec) {
+                error = ec.message();
+                return false;
+            }
+        } else {
+            const auto temporary = userPath.wstring() + L".tmp";
+            {
+                std::ofstream file(std::filesystem::path(temporary), std::ios::binary | std::ios::trunc);
+                if (!file) {
+                    error = "could not create user config";
+                    return false;
+                }
+                file << overrides.dump(2) << '\n';
+                file.flush();
+                if (!file) {
+                    error = "could not write user config";
+                    return false;
+                }
+            }
+            if (!::MoveFileExW(temporary.c_str(), userPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                error = "could not replace user config (Windows error " + std::to_string(::GetLastError()) + ")";
+                std::filesystem::remove(std::filesystem::path(temporary), ec);
+                return false;
+            }
+        }
+        ApplyEffective();
+        spdlog::set_level(verbose ? spdlog::level::trace : spdlog::level::info);
+        LogValues();
+        return true;
     }
 
     LoadReport Load()
@@ -102,6 +145,18 @@ namespace ST::Config {
         return report;
     }
 
+    void LogValues()
+    {
+        logger::info("[ST] Config: verbose={}, max_log_files={}, allocation_page={}", verbose, maxLogFiles, allocationPage);
+        logger::info("[ST] Config: points - starting_points={}, levels_per_point={}",
+            traits.points.startingPoints, traits.points.levelsPerPoint);
+        logger::info("[ST] Config: per point - stamina={:.1f}%, health={:.1f}%, magicka={:.1f}% of base; critical_chance={:.2f}%",
+            traits.staminaPercent * 100.0f, traits.healthPercent * 100.0f, traits.magickaPercent * 100.0f,
+            traits.criticalChancePerPoint);
+        logger::info("[ST] Config: per point - intelligence_skill_points={:.3f}, charisma_price_improvement={:.4f}",
+            traits.intelligenceSkillPoints, traits.charismaPriceImprovement);
+    }
+
     void LogReport(const LoadReport& report)
     {
         for (const auto& error : report.errors) {
@@ -112,12 +167,6 @@ namespace ST::Config {
         }
         logger::info("[ST] Config: defaults '{}', user overrides '{}' ({}).",
             report.defaultsPath, report.userPath, report.userFilePresent ? "present" : "absent");
-        logger::info("[ST] Config: verbose={}, max_log_files={}, allocation_page={}", verbose, maxLogFiles, allocationPage);
-        logger::info("[ST] Config: points - starting_points={}, levels_per_point={}",
-            traits.points.startingPoints, traits.points.levelsPerPoint);
-        logger::info("[ST] Config: per point - stamina={:.2f}, health={:.2f}, magicka={:.2f}, critical_chance={:.2f}%",
-            traits.staminaPerPoint, traits.healthPerPoint, traits.magickaPerPoint, traits.criticalChancePerPoint);
-        logger::info("[ST] Config: per point - intelligence_threshold_reduction={:.4f}, charisma_price_improvement={:.4f}",
-            traits.intelligenceThresholdReduction, traits.charismaPriceImprovement);
+        LogValues();
     }
 }

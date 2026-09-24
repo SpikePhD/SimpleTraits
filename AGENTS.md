@@ -9,11 +9,11 @@ points on them; each point gives one bonus:
 
 | Trait | Bonus per point | Setting (`per_point.*`) | Default |
 |---|---|---|---|
-| Strength | +Stamina | `stamina` | 5 |
-| Resilience | +Health | `health` | 5 |
+| Strength | +% of base Stamina | `stamina_percent` | 0.05 (5%) |
+| Resilience | +% of base Health | `health_percent` | 0.05 (5%) |
 | Agility | +Critical hit chance (mechanism to decide; see Rule details) | `critical_chance` | 1 (= +1%) |
-| Intelligence | Less XP needed per level, via SAL's threshold multiplier | `intelligence_threshold_reduction` | 0.02 per point |
-| Wisdom | +Magicka | `magicka` | 5 |
+| Intelligence | Extra SAL skill points per level, retroactive (SAL API V3) | `intelligence_skill_points` | 0.25 |
+| Wisdom | +% of base Magicka | `magicka_percent` | 0.05 (5%) |
 | Charisma | Better buy and sell prices (fBarterMin/fBarterMax) | `charisma_price_improvement` | 0.01 per point |
 
 ST requires Simple Alternate Levelling (SAL). SAL's repository is a separate project and
@@ -36,9 +36,11 @@ is reference only: never edit it from here.
 - Phase 1 (done): scaffold, SAL handshake, config, pure rules, diagnostics.
 - Phase 2 (done): cosave, Strength/Resilience/Wisdom bonuses on the permanent modifier
   layer, temporary SKSE Menu Framework debug page. Verified in game.
-- Phase 3 (current): trait allocation menu (`ST_TraitMenu.swf`) opened as SAL's
-  pre-skill-menu level-up step (SAL API V2), falling back to the V1 post-skill-menu step.
-  Agility, Intelligence and Charisma can be allocated but have no effect yet.
+- Phase 3 (done): trait allocation menu (`ST_TraitMenu.swf`) opened as SAL's
+  pre-skill-menu level-up step (SAL API V2). Verified in game.
+- Phase 4 (current): Strength/Resilience/Wisdom as a percentage of the base value;
+  Intelligence grants retroactive SAL skill points (SAL API V3); settings page in SKSE
+  Menu Framework; cosave v2. Agility and Charisma can be allocated but have no effect yet.
 
 ## Architecture
 
@@ -48,6 +50,7 @@ SKSEPluginLoad()
 ├── InitializeLog()               - timestamped spdlog in the standard SKSE log directory,
 │                                   retention from debug.max_log_files
 ├── Config::LogReport()           - logs config errors/warnings and effective values
+├── TraitState::SetSettings()     - copy of the validated trait settings
 ├── SKSE::Init(.log = false)
 ├── TraitState::RegisterSerialization() - cosave 'SMTR' / record 'TRTS' v1
 ├── MessagingInterface (SKSE)
@@ -55,7 +58,9 @@ SKSEPluginLoad()
 │   │                               which may run before or after ours)
 │   ├── kDataLoaded               - SALBridge::Finalize(): still pending -> Missing;
 │   │                               DiagnosticSinks::Register(); TraitMenu::Register()
-│   │                               (menu + SAL level-up step); DebugPage::Register()
+│   │                               (menu + SAL level-up step); SAL skill point bonus
+│   │                               (Intelligence); SettingsPage::Register();
+│   │                               DebugPage::Register()
 │   ├── kPreLoadGame              - TraitMenu::ResetState()
 │   ├── kPostLoadGame             - DiagnosticSinks::Reset(); TraitState::Reconcile()
 │   └── kNewGame                  - TraitMenu::ResetState(); DiagnosticSinks::Reset();
@@ -131,13 +136,22 @@ layouts in game.
 applied (`TraitRules::AppliedBonuses`). Both are saved in the cosave; unspent points are
 never stored.
 
-- **Reconcile** (`kPostLoadGame`, after each spend): `TraitRules::PlanReconcile` computes
-  `target = points * per_point` for Stamina (Strength), Health (Resilience) and Magicka
-  (Wisdom), applies `target - applied` with
+- **Reconcile** (`kPostLoadGame`, after each commit, after the vanilla LevelUp Menu
+  closes, after a settings change): `TraitRules::PlanReconcile` computes
+  `target = base * percent * points` for Stamina (Strength), Health (Resilience) and
+  Magicka (Wisdom), where `base` is `GetBaseActorValue` only (never other modifiers, so
+  ST's own bonus cannot compound). It applies `target - applied` with
   `ModActorValue(ACTOR_VALUE_MODIFIER::kPermanent, ...)` and records `target` as applied.
-  Base values are never written. Running it again changes nothing; a lowered per-point
-  setting removes only ST's own excess. Each change is logged with base/permanent/current
-  before and after.
+  Base values are never written. The bonus follows the base retroactively (level-up
+  attribute choice raises it); a lowered percentage removes only ST's own excess; Phase 2
+  flat bonuses migrate on the first load. Each change is logged with
+  base/permanent/current before and after.
+- **Intelligence** (SAL API V3 `RegisterSkillPointBonus`): SAL calls
+  `TraitState::TakeSkillPointBonus(level)` exactly once per level-up, after ST's trait menu.
+  It returns `floor(points * intelligence_skill_points * (level - 1)) - granted` (at least
+  0, at most 1000) and adds it to `skillPointsGranted` in the cosave, so Intelligence is
+  retroactive over every level-up and never takes points back. Lowering SAL's own points
+  per level is SAL's `skill_allocation.points_per_level`.
 - The engine stores the permanent modifier in the main save, so after a load the bonus is
   already present and the reconcile delta is 0 unless settings changed.
 - **Spend** (`SpendPoint`, main thread): +1 on a trait when `ValidateAllocation` allows it,
@@ -150,14 +164,28 @@ Known limits: if the cosave is lost while the main save keeps ST's modifiers, ST
 
 ### Cosave
 
-- Unique ID `SMTR`, record `TRTS`, version 1 (`TraitSave`, pure codec, portable tests).
-- Payload, little-endian: `uint32 allocation[6]`, `uint32 count` (max 8), then `count` x
-  `{ uint32 RE::ActorValue id, float32 applied }`. v1 writes Stamina, Health, Magicka.
+- Unique ID `SMTR`, record `TRTS`, version 2 (`TraitSave`, pure codec, portable tests).
+- Payload, little-endian: `uint32 allocation[6]`, `uint32 skillPointsGranted`,
+  `uint32 count` (max 8), then `count` x `{ uint32 RE::ActorValue id, float32 applied }`.
+  v2 writes Stamina, Health, Magicka. v1 records (no `skillPointsGranted`) still load.
   Entries are keyed by actor value so later bonuses (CriticalChance) extend the whitelist
   without a new layout.
 - Rejected: other versions, wrong lengths, allocations above `kMaxPointsPerTrait`, ids
   outside the whitelist, duplicate ids, non-finite amounts. The first valid record wins; a
   missing or rejected record means no allocations and nothing applied.
+
+### Settings page
+
+"Simple Traits / Settings" in SKSE Menu Framework (optional; without it players edit
+`SimpleTraits.user.json`). Settings are listed in registry order under Trait points,
+Bonuses per point and Debug, with labels and descriptions from the translation file
+(`$ST_SETTING_*`, `$ST_DESC_*`, cached on the main thread at registration) and the default
+in each tooltip. Values that differ from the default are highlighted. Like SAL's page,
+each committed edit (Enter, focus loss, +/- click, checkbox, reset all) is validated by
+`SettingsModel::Set`, saved atomically (`Config::SaveAndApply`, only differences from the
+shipped defaults) and applied on the main thread: `TraitState::SetSettings` then
+`ReconcileIfActive`. Partial typing is never saved. Rendering may run off the main thread;
+every model access holds the page's mutex.
 
 ### Debug page (temporary)
 
@@ -182,6 +210,8 @@ button per trait. Rendering may run off the main thread: the page reads
 | `assets/swf_src/scripts/frame_1/DoAction.as` | Trait menu ActionScript; `data/Interface/ST_TraitMenu.swf` is built from it |
 | `data/Interface/Translations/SimpleTraits_ENGLISH.txt` | Menu text (UTF-16 LE), generated by `tools/generate_translation.py` |
 | `docs/SAL_API_V2.md` | The SAL API V2 request (pre-skill-menu step), implemented in SAL `817e418` |
+| `src/SettingsPage.cpp` / `include/SettingsPage.h` | Settings page in SKSE Menu Framework |
+| `docs/SAL_API_V3.md` | The SAL API V3 request (skill point bonus), implemented in SAL `d53dc5b` |
 | `src/DebugPage.cpp` / `include/DebugPage.h` | Temporary SKSE Menu Framework page for spending points |
 | `extern/SKSEMenuFramework/SKSEMenuFramework.h` | Vendored MIT header (via SAL `751ebcd`, upstream `aa8effa`); runtime-resolved, no link dependency |
 | `src/HandshakeRules.cpp` / `include/HandshakeRules.h` | Pure SAL interface message validation |
@@ -215,12 +245,12 @@ by the portable tests on any OS.
 | `debug.allocation_page` | bool | | false (temporary debug page for spending points) |
 | `points.starting_points` | int | 0-100 | 4 |
 | `points.levels_per_point` | int | 1-100 | 3 |
-| `per_point.stamina` / `health` / `magicka` | number | 0-100 | 5 |
+| `per_point.stamina_percent` / `health_percent` / `magicka_percent` | number | 0-1 | 0.05 |
 | `per_point.critical_chance` | number | 0-10 | 1 |
-| `per_point.intelligence_threshold_reduction` | number | 0-0.5 | 0.02 |
+| `per_point.intelligence_skill_points` | number | 0-5 | 0.25 |
 | `per_point.charisma_price_improvement` | number | 0-0.05 | 0.01 |
 
-No settings page yet.
+All of these are editable on the settings page.
 
 ### Rule details
 
@@ -246,8 +276,6 @@ No settings page yet.
   the Calculate My Critical Hit Chance entry point for an exact percentage. Decide before
   implementing Agility; the shipped `per_point.critical_chance` comment and bounds follow
   that decision.
-- **Intelligence.** `multiplier = clamp(1 - points * reduction, 0.5, 1)`. ST clamps to 0.5
-  itself even though SAL also clamps with `integration.threshold_multiplier_floor`.
 - **Charisma.** From UESP Skyrim:Speech:
   `factor = fBarterMax - (fBarterMax - fBarterMin) * min(Speech, 100) / 100`,
   `buy = round(value * buyMod * factor)`, `sell = round(value * sellMod / factor)`,

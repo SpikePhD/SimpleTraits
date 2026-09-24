@@ -18,6 +18,7 @@ namespace ST::TraitState {
         std::int64_t               unspent{ 0 };
         TraitRules::Allocation     allocation{};
         TraitRules::AppliedBonuses applied{};
+        std::uint32_t              skillPointsGranted{ 0 };
     };
 
     // Registers the cosave unique ID and save/load/revert callbacks. Call
@@ -31,6 +32,20 @@ namespace ST::TraitState {
     // what the allocation and settings call for, on the permanent modifier
     // layer, and records the new applied amounts.
     void Reconcile(std::string_view reason);
+
+    // Main thread. Reconcile only when a game is active, logging at info
+    // level only when something changed (for frequent triggers such as the
+    // vanilla LevelUp Menu closing after the attribute choice).
+    void ReconcileIfActive(std::string_view reason);
+
+    // Copies the validated settings used for points and bonuses. Call after
+    // Config::Load and after every settings change, then reconcile.
+    void SetSettings(const TraitRules::TraitSettings& settings);
+
+    // Main thread; SAL's skill point bonus provider. Returns the whole SAL
+    // skill points Intelligence still owes at `level` (retroactive, never
+    // negative) and records them as granted in the cosave.
+    [[nodiscard]] std::int32_t TakeSkillPointBonus(std::uint32_t level);
 
     // Main thread. Replaces the allocation with `proposed` when
     // ValidateAllocation allows it (no decreases, never more than unspent),

@@ -10,6 +10,7 @@ namespace ST::SALBridge {
         std::atomic<State>                      s_state{ State::kPending };
         std::atomic<const SAL::SALInterfaceV1*> s_interface{ nullptr };
         std::atomic<const SAL::SALInterfaceV2*> s_interfaceV2{ nullptr };  // set only for a usable V2
+        std::atomic<const SAL::SALInterfaceV3*> s_interfaceV3{ nullptr };  // set only for a usable V3
         bool                                    s_finalized{ false };
 
         void OnSALMessage(SKSE::MessagingInterface::Message* msg)
@@ -42,9 +43,14 @@ namespace ST::SALBridge {
             if (v2) {
                 s_interfaceV2 = static_cast<const SAL::SALInterfaceV2*>(msg->data);
             }
+            const bool v3 = HandshakeRules::HasSkillPointBonus(msg->data, msg->dataLen);
+            if (v3) {
+                s_interfaceV3 = static_cast<const SAL::SALInterfaceV3*>(msg->data);
+            }
             s_state = State::kReady;
-            logger::info("[ST] SAL: interface V{} received ({} bytes); pre-skill-menu step {}.",
-                api->version, msg->dataLen, v2 ? "available" : "unavailable (V1 step fallback)");
+            logger::info("[ST] SAL: interface V{} received ({} bytes); pre-skill-menu step {}; skill point bonus {}.",
+                api->version, msg->dataLen, v2 ? "available" : "unavailable (V1 step fallback)",
+                v3 ? "available" : "unavailable (Intelligence has no effect)");
         }
     }
 
@@ -135,6 +141,26 @@ namespace ST::SALBridge {
             logger::error("[ST] SAL: V1 level-up step rejected by SAL; the trait menu will not open on level-up.");
         }
         return ok;
+    }
+
+    bool HasSkillPointBonus() noexcept
+    {
+        return IsAvailable() && s_interfaceV3.load() != nullptr;
+    }
+
+    bool RegisterSkillPointBonus(std::int32_t (*bonus)(std::uint32_t level))
+    {
+        const auto* v3 = HasSkillPointBonus() ? s_interfaceV3.load() : nullptr;
+        if (!v3) {
+            logger::warn("[ST] SAL: no skill point bonus hook (SAL API V3); Intelligence has no effect.");
+            return false;
+        }
+        if (!v3->RegisterSkillPointBonus(bonus)) {
+            logger::error("[ST] SAL: skill point bonus rejected by SAL; Intelligence has no effect.");
+            return false;
+        }
+        logger::info("[ST] SAL: skill point bonus registered (Intelligence).");
+        return true;
     }
 
     void ContinueLevelUp()

@@ -4,6 +4,7 @@
 #include "DiagnosticSinks.h"
 #include "LogPolicy.h"
 #include "SALBridge.h"
+#include "SettingsPage.h"
 #include "TraitMenu.h"
 #include "TraitState.h"
 
@@ -110,6 +111,8 @@ namespace {
         }
         ST::DiagnosticSinks::Register();
         ST::TraitMenu::Register();
+        ST::SALBridge::RegisterSkillPointBonus(ST::TraitState::TakeSkillPointBonus);
+        ST::SettingsPage::Register();
         ST::DebugPage::Register();
         logger::info("[ST] All systems initialised (SAL {}).", ST::SALBridge::StateName(ST::SALBridge::GetState()));
     }
@@ -123,6 +126,7 @@ SKSEPluginLoad(const SKSE::LoadInterface* a_skse)
     InitializeLog(ST::Config::verbose, ST::Config::maxLogFiles);
     logger::info("[ST] SimpleTraits loaded. Version {}", ST_VERSION);
     ST::Config::LogReport(configReport);
+    ST::TraitState::SetSettings(ST::Config::traits);
 
     if (!a_skse) {
         logger::critical("[ST] SKSE LoadInterface is null; plugin load aborted.");

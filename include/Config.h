@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+namespace ST { class SettingsModel; }
+
 namespace ST::Config {
 
     // Validated effective values. Written only by Load() (main thread, during
@@ -28,4 +30,13 @@ namespace ST::Config {
 
     // Logs the report and the effective values. Call after InitializeLog().
     void LogReport(const LoadReport& report);
+    void LogValues();
+
+    // The layered settings model, edited by the settings page. Callers
+    // serialize access (the settings page holds its own mutex).
+    [[nodiscard]] SettingsModel& Settings();
+
+    // Main thread. Writes SimpleTraits.user.json atomically (only values
+    // that differ from the shipped defaults) and refreshes the globals above.
+    [[nodiscard]] bool SaveAndApply(std::string& error);
 }

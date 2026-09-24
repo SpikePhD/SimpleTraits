@@ -11,21 +11,22 @@ namespace ST {
 
         // Built-in defaults match data/SKSE/Plugins/SimpleTraits.json and
         // TraitRules::TraitSettings; the settings test checks both.
+        // Order is also the settings page order.
         constexpr std::array kRegistry{
-            SettingDescriptor{ "debug.verbose", SettingKind::Toggle, 0, 1, 0 },
-            SettingDescriptor{ "debug.max_log_files", SettingKind::Integer, 0, 1000, 10 },
-            SettingDescriptor{ "debug.allocation_page", SettingKind::Toggle, 0, 1, 0 },
-            SettingDescriptor{ "points.starting_points", SettingKind::Integer, 0, 100, 4 },
-            SettingDescriptor{ "points.levels_per_point", SettingKind::Integer, 1, 100, 3 },
-            SettingDescriptor{ "per_point.stamina", SettingKind::Number, 0, 100, 5 },
-            SettingDescriptor{ "per_point.health", SettingKind::Number, 0, 100, 5 },
-            SettingDescriptor{ "per_point.magicka", SettingKind::Number, 0, 100, 5 },
-            SettingDescriptor{ "per_point.critical_chance", SettingKind::Number, 0, 10, 1 },
-            SettingDescriptor{ "per_point.intelligence_threshold_reduction", SettingKind::Number, 0, 0.5, 0.02 },
-            SettingDescriptor{ "per_point.charisma_price_improvement", SettingKind::Number, 0, 0.05, 0.01 },
+            SettingDescriptor{ "points.starting_points", SettingKind::Integer, 0, 100, 4, 1 },
+            SettingDescriptor{ "points.levels_per_point", SettingKind::Integer, 1, 100, 3, 1 },
+            SettingDescriptor{ "per_point.stamina_percent", SettingKind::Number, 0, 1, 0.05, 0.01 },
+            SettingDescriptor{ "per_point.health_percent", SettingKind::Number, 0, 1, 0.05, 0.01 },
+            SettingDescriptor{ "per_point.magicka_percent", SettingKind::Number, 0, 1, 0.05, 0.01 },
+            SettingDescriptor{ "per_point.critical_chance", SettingKind::Number, 0, 10, 1, 0.5 },
+            SettingDescriptor{ "per_point.intelligence_skill_points", SettingKind::Number, 0, 5, 0.25, 0.05 },
+            SettingDescriptor{ "per_point.charisma_price_improvement", SettingKind::Number, 0, 0.05, 0.01, 0.005 },
+            SettingDescriptor{ "debug.verbose", SettingKind::Toggle, 0, 1, 0, 1 },
+            SettingDescriptor{ "debug.max_log_files", SettingKind::Integer, 0, 1000, 10, 1 },
+            SettingDescriptor{ "debug.allocation_page", SettingKind::Toggle, 0, 1, 0, 1 },
         };
 
-        const Json* Find(const Json& root, std::string_view path)
+        const Json* FindPath(const Json& root, std::string_view path)
         {
             const Json* node = &root;
             std::size_t start = 0;
@@ -94,6 +95,43 @@ namespace ST {
         return kRegistry;
     }
 
+    const SettingDescriptor* SettingsModel::Find(std::string_view key)
+    {
+        for (const auto& descriptor : kRegistry) {
+            if (descriptor.key == key) return &descriptor;
+        }
+        return nullptr;
+    }
+
+    const SettingsModel::Json* SettingsModel::Value(const Json& root, std::string_view key)
+    {
+        return FindPath(root, key);
+    }
+
+    bool SettingsModel::Set(std::string_view key, const Json& value)
+    {
+        const auto* descriptor = Find(key);
+        if (!descriptor || !Valid(*descriptor, value)) return false;
+        Put(effective_, key, Normalized(*descriptor, value));
+        return true;
+    }
+
+    void SettingsModel::ResetAll()
+    {
+        effective_ = shipped_;
+    }
+
+    SettingsModel::Json SettingsModel::Overrides() const
+    {
+        Json result = { { "config_version", kSchemaVersion } };
+        for (const auto& descriptor : kRegistry) {
+            const auto* value = FindPath(effective_, descriptor.key);
+            const auto* base = FindPath(shipped_, descriptor.key);
+            if (value && base && *value != *base) Put(result, descriptor.key, *value);
+        }
+        return result;
+    }
+
     bool SettingsModel::Valid(const SettingDescriptor& descriptor, const Json& value)
     {
         if (descriptor.kind == SettingKind::Toggle) return value.is_boolean();
@@ -120,7 +158,7 @@ namespace ST {
 
         Json effective = BuiltInDefaults();
         for (const auto& descriptor : kRegistry) {
-            if (const auto* value = Find(shipped, descriptor.key)) {
+            if (const auto* value = FindPath(shipped, descriptor.key)) {
                 if (Valid(descriptor, *value)) {
                     Put(effective, descriptor.key, Normalized(descriptor, *value));
                 } else {
@@ -146,7 +184,7 @@ namespace ST {
 
         if (applyUser) {
             for (const auto& descriptor : kRegistry) {
-                if (const auto* value = Find(user, descriptor.key)) {
+                if (const auto* value = FindPath(user, descriptor.key)) {
                     if (Valid(descriptor, *value)) {
                         Put(effective, descriptor.key, Normalized(descriptor, *value));
                     } else {
@@ -168,6 +206,14 @@ namespace ST {
             visit(user, "");
         }
 
+        // Shipped defaults are resolved before user overrides are applied;
+        // rebuild them from the validated shipped values alone.
+        shipped_ = BuiltInDefaults();
+        for (const auto& descriptor : kRegistry) {
+            if (const auto* value = FindPath(shipped, descriptor.key); value && Valid(descriptor, *value)) {
+                Put(shipped_, descriptor.key, Normalized(descriptor, *value));
+            }
+        }
         effective_ = std::move(effective);
         return true;
     }

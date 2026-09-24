@@ -18,17 +18,17 @@
   },
 
   "per_point": {
-    "stamina": 5.0,
-    "health": 5.0,
-    "magicka": 5.0,
+    "stamina_percent": 0.05,
+    "health_percent": 0.05,
+    "magicka_percent": 0.05,
     "critical_chance": 1.0,
-    "intelligence_threshold_reduction": 0.02,
+    "intelligence_skill_points": 0.25,
     "charisma_price_improvement": 0.01,
-    "_comment_stamina": "Strength: Stamina per point (0-100).",
-    "_comment_health": "Resilience: Health per point (0-100).",
-    "_comment_magicka": "Wisdom: Magicka per point (0-100).",
+    "_comment_stamina_percent": "Strength: fraction of base Stamina added per point (0.05 = 5%; 0-1). Follows the base value, so it grows as base Stamina grows.",
+    "_comment_health_percent": "Resilience: fraction of base Health added per point (0.05 = 5%; 0-1).",
+    "_comment_magicka_percent": "Wisdom: fraction of base Magicka added per point (0.05 = 5%; 0-1).",
     "_comment_critical_chance": "Agility: critical hit chance per point, in percent (1.0 = +1%; 0-10).",
-    "_comment_intelligence_threshold_reduction": "Intelligence: fraction of XP needed per level removed per point (0.02 = 2%; 0-0.5). The multiplier never goes below 0.5, and Simple Alternate Levelling applies its own floor too.",
+    "_comment_intelligence_skill_points": "Intelligence: extra Simple Alternate Levelling skill points per level per point (0.25 = four points give +1 per level; 0-5). Retroactive: counts every level-up so far. Never taken back.",
     "_comment_charisma_price_improvement": "Charisma: fraction the barter price factor drops per point (0.01 = buy about 1% cheaper and sell about 1% dearer; 0-0.05). Selling never pays more than buying costs."
   }
 }

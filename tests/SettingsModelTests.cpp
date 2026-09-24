@@ -45,11 +45,11 @@ int main(int argc, char** argv)
     const auto& e = model.Effective();
     assert(e["points"]["starting_points"] == defaults.points.startingPoints);
     assert(e["points"]["levels_per_point"] == defaults.points.levelsPerPoint);
-    assert(e["per_point"]["stamina"].get<float>() == defaults.staminaPerPoint);
-    assert(e["per_point"]["health"].get<float>() == defaults.healthPerPoint);
-    assert(e["per_point"]["magicka"].get<float>() == defaults.magickaPerPoint);
+    assert(e["per_point"]["stamina_percent"].get<float>() == defaults.staminaPercent);
+    assert(e["per_point"]["health_percent"].get<float>() == defaults.healthPercent);
+    assert(e["per_point"]["magicka_percent"].get<float>() == defaults.magickaPercent);
     assert(e["per_point"]["critical_chance"].get<float>() == defaults.criticalChancePerPoint);
-    assert(e["per_point"]["intelligence_threshold_reduction"].get<float>() == defaults.intelligenceThresholdReduction);
+    assert(e["per_point"]["intelligence_skill_points"].get<float>() == defaults.intelligenceSkillPoints);
     assert(e["per_point"]["charisma_price_improvement"].get<float>() == defaults.charismaPriceImprovement);
     assert(e["config_version"] == SettingsModel::kSchemaVersion);
 
@@ -58,20 +58,20 @@ int main(int argc, char** argv)
     const Json user = {
         { "config_version", 1 },
         { "points", { { "starting_points", 7 }, { "levels_per_point", 0 } } },
-        { "per_point", { { "stamina", 12.5 }, { "health", "bad" }, { "critical_chance", 11.0 },
-                         { "intelligence_threshold_reduction", 0.03 } } },
+        { "per_point", { { "stamina_percent", 0.125 }, { "health_percent", "bad" }, { "critical_chance", 11.0 },
+                         { "intelligence_skill_points", 0.5 } } },
         { "typo_section", { { "x", 1 } } },
         { "_comment", "ignored" }
     };
     assert(model.Load(shipped, user, &warnings));
     assert(model.Effective()["points"]["starting_points"] == 7);
     assert(model.Effective()["points"]["levels_per_point"] == shipped["points"]["levels_per_point"]);
-    assert(model.Effective()["per_point"]["stamina"] == 12.5);
-    assert(model.Effective()["per_point"]["health"] == shipped["per_point"]["health"]);
+    assert(model.Effective()["per_point"]["stamina_percent"] == 0.125);
+    assert(model.Effective()["per_point"]["health_percent"] == shipped["per_point"]["health_percent"]);
     assert(model.Effective()["per_point"]["critical_chance"] == shipped["per_point"]["critical_chance"]);
-    assert(model.Effective()["per_point"]["intelligence_threshold_reduction"] == 0.03);
+    assert(model.Effective()["per_point"]["intelligence_skill_points"] == 0.5);
     assert(HasWarning(warnings, "points.levels_per_point"));
-    assert(HasWarning(warnings, "per_point.health"));
+    assert(HasWarning(warnings, "per_point.health_percent"));
     assert(HasWarning(warnings, "per_point.critical_chance"));
     assert(HasWarning(warnings, "unknown override ignored: typo_section.x"));
     assert(!HasWarning(warnings, "_comment"));
@@ -86,13 +86,18 @@ int main(int argc, char** argv)
     assert(model.Effective()["points"]["starting_points"] == 4);
     assert(warnings.size() == 1);
 
-    // Bounds are inclusive; the Intelligence reduction may not exceed 0.5.
-    assert(model.Load(shipped, { { "per_point", { { "intelligence_threshold_reduction", 0.5 },
+    // Bounds are inclusive; a percentage may not exceed 1 (100% per point).
+    assert(model.Load(shipped, { { "per_point", { { "health_percent", 1.0 },
                                                   { "charisma_price_improvement", 0.0 } } } }));
-    assert(model.Effective()["per_point"]["intelligence_threshold_reduction"] == 0.5);
+    assert(model.Effective()["per_point"]["health_percent"] == 1.0);
     assert(model.Effective()["per_point"]["charisma_price_improvement"] == 0.0);
-    assert(model.Load(shipped, { { "per_point", { { "intelligence_threshold_reduction", 0.51 } } } }));
-    assert(model.Effective()["per_point"]["intelligence_threshold_reduction"] == 0.02);
+    assert(model.Load(shipped, { { "per_point", { { "health_percent", 1.01 } } } }));
+    assert(model.Effective()["per_point"]["health_percent"] == 0.05);
+
+    // Phase 2 flat keys are no longer settings: reported as unknown, ignored.
+    warnings.clear();
+    assert(model.Load(shipped, { { "per_point", { { "health", 10.0 } } } }, &warnings));
+    assert(HasWarning(warnings, "unknown override ignored: per_point.health"));
 
     // Schema version: future or malformed versions ignore the whole user file;
     // a missing version is treated as version 1.
@@ -109,11 +114,11 @@ int main(int argc, char** argv)
 
     // Invalid shipped values fall back to built-in defaults with a warning.
     Json damaged = shipped;
-    damaged["per_point"]["magicka"] = -1.0;
+    damaged["per_point"]["magicka_percent"] = -1.0;
     damaged["debug"]["verbose"] = "yes";
     warnings.clear();
     assert(model.Load(damaged, Json(), &warnings));
-    assert(model.Effective()["per_point"]["magicka"] == 5.0);
+    assert(model.Effective()["per_point"]["magicka_percent"] == 0.05);
     assert(model.Effective()["debug"]["verbose"] == false);
     assert(warnings.size() == 2);
 
@@ -122,6 +127,35 @@ int main(int argc, char** argv)
     warnings.clear();
     assert(model.Load(shipped, Json::array(), &warnings));
     assert(HasWarning(warnings, "not a JSON object"));
+
+    // Settings page editing: Set validates each value; Overrides holds only
+    // the differences from the shipped defaults.
+    SettingsModel page;
+    assert(page.Load(shipped, Json()));
+    assert(page.Overrides() == Json({ { "config_version", SettingsModel::kSchemaVersion } }));
+    assert(page.Set("per_point.health_percent", 0.1));
+    assert(!page.Set("per_point.health_percent", 2.0));
+    assert(!page.Set("per_point.no_such_setting", 1.0));
+    assert(page.Set("points.starting_points", 6.0));
+    assert(!page.Set("points.starting_points", 6.5));
+    assert(page.Effective()["points"]["starting_points"].is_number_integer());
+    const Json overrides = page.Overrides();
+    assert(overrides["per_point"]["health_percent"] == 0.1);
+    assert(overrides["points"]["starting_points"] == 6);
+    assert(!overrides["per_point"].contains("stamina_percent"));
+    SettingsModel reloaded;
+    assert(reloaded.Load(shipped, Json::parse(overrides.dump())));
+    assert(reloaded.Effective() == page.Effective());
+    assert(page.Set("per_point.health_percent", 0.05));
+    assert(!page.Overrides()["per_point"].contains("health_percent"));
+    page.ResetAll();
+    assert(page.Effective() == page.Shipped());
+
+    // Shipped() reflects the shipped file, not the user's overrides.
+    SettingsModel layered;
+    assert(layered.Load(shipped, { { "per_point", { { "magicka_percent", 0.2 } } } }));
+    assert(layered.Shipped()["per_point"]["magicka_percent"] == 0.05);
+    assert(layered.Overrides()["per_point"]["magicka_percent"] == 0.2);
 
     std::cout << "settings model tests passed\n";
 }

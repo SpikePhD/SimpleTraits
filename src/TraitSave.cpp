@@ -40,6 +40,7 @@ namespace ST::TraitSave {
         for (const auto points : state.allocation) {
             AppendU32(bytes, points);
         }
+        AppendU32(bytes, state.skillPointsGranted);
         AppendU32(bytes, static_cast<std::uint32_t>(TraitRules::kBonusCount));
         for (std::size_t i = 0; i < TraitRules::kBonusCount; ++i) {
             AppendU32(bytes, TraitRules::BonusActorValueId(static_cast<TraitRules::Bonus>(i)));
@@ -50,10 +51,11 @@ namespace ST::TraitSave {
 
     DecodeResult Decode(std::uint32_t version, std::span<const std::byte> data) noexcept
     {
-        if (version != kVersion) {
+        if (version != kVersion && version != kVersion1) {
             return { DecodeStatus::kUnsupportedVersion };
         }
-        if (data.size() < kHeaderSize || data.size() > kMaxRecordSize) {
+        const std::size_t headerSize = version == kVersion1 ? kHeaderSizeV1 : kHeaderSize;
+        if (data.size() < headerSize || data.size() > kMaxRecordSize) {
             return { DecodeStatus::kInvalidLength };
         }
 
@@ -67,9 +69,14 @@ namespace ST::TraitSave {
             }
         }
 
+        if (version != kVersion1) {
+            state.skillPointsGranted = ReadU32(data, offset);
+            offset += 4;
+        }
+
         const auto count = ReadU32(data, offset);
         offset += 4;
-        if (count > kMaxAppliedEntries || data.size() != kHeaderSize + count * kEntrySize) {
+        if (count > kMaxAppliedEntries || data.size() != headerSize + count * kEntrySize) {
             return { DecodeStatus::kInvalidLength };
         }
 

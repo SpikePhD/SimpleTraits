@@ -57,4 +57,13 @@ namespace ST::HandshakeRules {
         const auto* api = static_cast<const SAL::SALInterfaceV2*>(data);
         return api->v1.version >= SAL::kInterfaceVersion2 && api->RegisterPreSkillMenuStep != nullptr;
     }
+
+    bool HasSkillPointBonus(const void* data, std::uint32_t dataLen) noexcept
+    {
+        if (!data || dataLen < sizeof(SAL::SALInterfaceV3)) {
+            return false;
+        }
+        const auto* api = static_cast<const SAL::SALInterfaceV3*>(data);
+        return api->v2.v1.version >= SAL::kInterfaceVersion3 && api->RegisterSkillPointBonus != nullptr;
+    }
 }

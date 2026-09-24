@@ -35,13 +35,17 @@ namespace {
         AppendU32(bytes, std::bit_cast<std::uint32_t>(value));
     }
 
-    // Hand-built record: allocation, then (id, amount) pairs.
+    // Hand-built v2 record: allocation, granted, then (id, amount) pairs.
+    // With granted = nullopt the v1 layout is produced.
     std::vector<std::byte> Record(const Allocation& allocation,
-        const std::vector<std::pair<std::uint32_t, float>>& entries)
+        const std::vector<std::pair<std::uint32_t, float>>& entries, std::optional<std::uint32_t> granted = 0u)
     {
         std::vector<std::byte> bytes;
         for (const auto points : allocation) {
             AppendU32(bytes, points);
+        }
+        if (granted) {
+            AppendU32(bytes, *granted);
         }
         AppendU32(bytes, static_cast<std::uint32_t>(entries.size()));
         for (const auto& [id, amount] : entries) {
@@ -60,9 +64,9 @@ namespace {
 
     void TestRoundTrip()
     {
-        const State state{ { 3, 1, 0, 2, 5, 0 }, { 15.0f, 5.0f, 25.0f } };
+        const State state{ { 3, 1, 0, 2, 5, 0 }, { 15.0f, 5.0f, 25.0f }, 7 };
         const auto bytes = Encode(state);
-        Check(bytes.size() == kHeaderSize + 3 * kEntrySize, "encoded length is fixed for v1");
+        Check(bytes.size() == kHeaderSize + 3 * kEntrySize, "encoded length is fixed for v2");
         const auto decoded = Decode(kVersion, bytes);
         Check(decoded.Succeeded(), "round trip decodes");
         Check(decoded.state == state, "round trip preserves state");
@@ -72,6 +76,7 @@ namespace {
 
         // Little-endian layout: first allocation, then the Stamina entry id (26).
         Check(bytes[0] == std::byte{ 3 } && bytes[1] == std::byte{ 0 }, "allocation is little-endian");
+        Check(bytes[kHeaderSizeV1 - 4] == std::byte{ 7 }, "granted follows the allocation");
         Check(bytes[kHeaderSize] == std::byte{ 26 }, "first applied entry is Stamina (26)");
     }
 
@@ -86,13 +91,26 @@ namespace {
         Check(Decode(kVersion, Record(allocation, {})).Succeeded(), "zero entries allowed");
     }
 
+    void TestVersion1()
+    {
+        const Allocation allocation{ 1, 1, 0, 0, 1, 0 };
+        const auto v1 = Record(allocation, { { 26, 5.0f }, { 24, 5.0f }, { 25, 5.0f } }, std::nullopt);
+        const auto decoded = Decode(kVersion1, v1);
+        Check(decoded.Succeeded(), "Phase 2 (v1) record still loads");
+        Check(decoded.state.allocation == allocation && decoded.state.applied[0] == 5.0f, "v1 values kept");
+        Check(decoded.state.skillPointsGranted == 0, "v1 has no Intelligence grants yet");
+        Check(Decode(kVersion, v1).status == DecodeStatus::kInvalidLength, "v1 bytes are not a v2 record");
+        Check(Decode(kVersion1, Record(allocation, {})).status == DecodeStatus::kInvalidLength,
+            "v2 bytes are not a v1 record");
+    }
+
     void TestRejections()
     {
         const Allocation allocation{};
         const auto valid = Encode(State{});
 
         Check(Decode(0, valid).status == DecodeStatus::kUnsupportedVersion, "version 0 rejected");
-        Check(Decode(2, valid).status == DecodeStatus::kUnsupportedVersion, "future version rejected");
+        Check(Decode(3, valid).status == DecodeStatus::kUnsupportedVersion, "future version rejected");
 
         auto truncated = valid;
         truncated.pop_back();
@@ -150,6 +168,7 @@ int main()
     TestIdentifiers();
     TestRoundTrip();
     TestFlexibleEntries();
+    TestVersion1();
     TestRejections();
     TestAdoption();
     if (failures == 0) {

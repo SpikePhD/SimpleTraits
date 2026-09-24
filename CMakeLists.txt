@@ -81,6 +81,7 @@ if(ST_BUILD_PLUGIN)
         src/TraitMenu.cpp
         src/HandshakeRules.cpp
         src/SALBridge.cpp
+        src/SettingsPage.cpp
         src/DebugPage.cpp
         src/DiagnosticSinks.cpp
         src/LogPolicy.cpp

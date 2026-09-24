@@ -4,6 +4,7 @@
 #include "Config.h"
 #include "TraitSave.h"
 
+#include <cmath>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -17,9 +18,12 @@ namespace ST::TraitState {
         static_assert(static_cast<std::uint32_t>(RE::ActorValue::kMagicka) == 25);
         static_assert(static_cast<std::uint32_t>(RE::ActorValue::kStamina) == 26);
 
-        std::mutex             s_mutex;
-        TraitSave::State       s_state;
-        bool                   s_gameActive{ false };
+        std::mutex                s_mutex;
+        TraitSave::State          s_state;
+        bool                      s_gameActive{ false };
+        // Copy of Config::traits, so snapshots from the render thread never
+        // read the Config globals the settings page rewrites.
+        TraitRules::TraitSettings s_settings{};
 
         RE::ActorValue ToActorValue(Bonus bonus)
         {
@@ -57,7 +61,7 @@ namespace ST::TraitState {
         void LogStateLocked(std::string_view reason)
         {
             const auto level = PlayerLevel();
-            const auto& points = Config::traits.points;
+            const auto& points = s_settings.points;
             std::string values = "player unavailable";
             auto* player = RE::PlayerCharacter::GetSingleton();
             if (auto* avo = player ? player->AsActorValueOwner() : nullptr) {
@@ -70,14 +74,16 @@ namespace ST::TraitState {
                         avo->GetBaseActorValue(av));
                 }
             }
-            logger::info("[ST] State ({}): level {}, earned {}, spent {}, unspent {}; points {}; ST applied {}; {}.",
+            logger::info("[ST] State ({}): level {}, earned {}, spent {}, unspent {}; points {}; ST applied {}; "
+                         "skill points granted {}; {}.",
                 reason, level, TraitRules::EarnedPoints(level, points), TraitRules::SpentPoints(s_state.allocation),
                 TraitRules::UnspentPoints(level, points, s_state.allocation), DescribeAllocation(s_state.allocation),
-                DescribeApplied(s_state.applied), values);
+                DescribeApplied(s_state.applied), s_state.skillPointsGranted, values);
         }
 
-        // Caller holds s_mutex.
-        void ReconcileLocked(std::string_view reason)
+        // Caller holds s_mutex. With quietWhenUnchanged, a reconcile that
+        // changes nothing logs nothing at info level (frequent triggers).
+        void ReconcileLocked(std::string_view reason, bool quietWhenUnchanged = false)
         {
             auto* player = RE::PlayerCharacter::GetSingleton();
             auto* avo = player ? player->AsActorValueOwner() : nullptr;
@@ -86,20 +92,28 @@ namespace ST::TraitState {
                 return;
             }
 
-            const auto plans = TraitRules::PlanReconcile(s_state.allocation, Config::traits, s_state.applied);
+            // Bonuses are a percentage of the BASE value only, so the plugin's
+            // own permanent modifier never feeds back into its target.
+            TraitRules::BaseValues bases{};
+            for (std::size_t i = 0; i < TraitRules::kBonusCount; ++i) {
+                bases[i] = avo->GetBaseActorValue(ToActorValue(static_cast<Bonus>(i)));
+            }
+            const auto plans = TraitRules::PlanReconcile(s_state.allocation, s_settings, bases, s_state.applied);
+            bool changed = false;
             for (std::size_t i = 0; i < TraitRules::kBonusCount; ++i) {
                 const auto bonus = static_cast<Bonus>(i);
                 const auto& plan = plans[i];
                 if (!plan.valid) {
-                    logger::error("[ST] Reconcile ({}): recorded {} bonus is not finite; left untouched.",
-                        reason, TraitRules::BonusName(bonus));
+                    logger::error("[ST] Reconcile ({}): {} base {:.2f} or recorded bonus {:.2f} unusable; left untouched.",
+                        reason, TraitRules::BonusName(bonus), bases[i], s_state.applied[i]);
                     continue;
                 }
-                if (plan.delta == 0.0f) {
-                    logger::info("[ST] Reconcile ({}): {} unchanged at {:.2f}.",
+                if (std::fabs(plan.delta) < 0.001f) {
+                    logger::debug("[ST] Reconcile ({}): {} unchanged at {:.2f}.",
                         reason, TraitRules::BonusName(bonus), plan.target);
                     continue;
                 }
+                changed = true;
 
                 const auto av = ToActorValue(bonus);
                 const float baseBefore = avo->GetBaseActorValue(av);
@@ -113,7 +127,9 @@ namespace ST::TraitState {
                     baseBefore, avo->GetBaseActorValue(av), permanentBefore, avo->GetPermanentActorValue(av),
                     currentBefore, avo->GetActorValue(av));
             }
-            LogStateLocked(reason);
+            if (changed || !quietWhenUnchanged) {
+                LogStateLocked(reason);
+            }
         }
 
         void OnGameSave(SKSE::SerializationInterface* intfc)
@@ -129,8 +145,8 @@ namespace ST::TraitState {
                 logger::error("[ST] Cosave: failed to write the trait record.");
                 return;
             }
-            logger::info("[ST] Cosave v{}: saved {}; applied {}.", TraitSave::kVersion,
-                DescribeAllocation(s_state.allocation), DescribeApplied(s_state.applied));
+            logger::info("[ST] Cosave v{}: saved {}; applied {}; skill points granted {}.", TraitSave::kVersion,
+                DescribeAllocation(s_state.allocation), DescribeApplied(s_state.applied), s_state.skillPointsGranted);
         }
 
         void OnGameLoad(SKSE::SerializationInterface* intfc)
@@ -173,8 +189,8 @@ namespace ST::TraitState {
 
             if (accepted) {
                 s_state = *accepted;
-                logger::info("[ST] Cosave: restored {}; applied {}.",
-                    DescribeAllocation(s_state.allocation), DescribeApplied(s_state.applied));
+                logger::info("[ST] Cosave: restored {}; applied {}; skill points granted {}.",
+                    DescribeAllocation(s_state.allocation), DescribeApplied(s_state.applied), s_state.skillPointsGranted);
             } else {
                 logger::info("[ST] Cosave: no trait record; starting with no allocations and nothing applied.");
             }
@@ -220,6 +236,34 @@ namespace ST::TraitState {
         ReconcileLocked(reason);
     }
 
+    void ReconcileIfActive(std::string_view reason)
+    {
+        std::lock_guard lock(s_mutex);
+        if (s_gameActive) {
+            ReconcileLocked(reason, true);
+        }
+    }
+
+    void SetSettings(const TraitRules::TraitSettings& settings)
+    {
+        std::lock_guard lock(s_mutex);
+        s_settings = settings;
+    }
+
+    std::int32_t TakeSkillPointBonus(std::uint32_t level)
+    {
+        std::lock_guard lock(s_mutex);
+        const auto intelligence = s_state.allocation[static_cast<std::size_t>(TraitRules::Trait::kIntelligence)];
+        const auto owed = TraitRules::SkillPointsOwed(
+            intelligence, s_settings.intelligenceSkillPoints, level, s_state.skillPointsGranted);
+        if (owed > 0) {
+            s_state.skillPointsGranted += static_cast<std::uint32_t>(owed);
+        }
+        logger::info("[ST] Intelligence: level {}, {} points x {:.3f}/level: +{} skill points (granted {} in total).",
+            level, intelligence, s_settings.intelligenceSkillPoints, owed, s_state.skillPointsGranted);
+        return owed;
+    }
+
     std::optional<TraitRules::AllocationError> CommitAllocation(
         const TraitRules::Allocation& proposed, std::string_view source)
     {
@@ -228,7 +272,7 @@ namespace ST::TraitState {
             logger::info("[ST] Commit ({}): no game loaded.", source);
             return std::nullopt;
         }
-        const auto earned = TraitRules::EarnedPoints(PlayerLevel(), Config::traits.points);
+        const auto earned = TraitRules::EarnedPoints(PlayerLevel(), s_settings.points);
         const auto result = TraitRules::ValidateAllocation(s_state.allocation, proposed, earned);
         if (result != TraitRules::AllocationError::kNone) {
             logger::warn("[ST] Commit ({}): rejected ({}); kept {}.", source,
@@ -269,11 +313,12 @@ namespace ST::TraitState {
         snapshot.gameActive = s_gameActive;
         snapshot.allocation = s_state.allocation;
         snapshot.applied = s_state.applied;
+        snapshot.skillPointsGranted = s_state.skillPointsGranted;
         if (s_gameActive) {
             snapshot.level = PlayerLevel();
-            snapshot.earned = TraitRules::EarnedPoints(snapshot.level, Config::traits.points);
+            snapshot.earned = TraitRules::EarnedPoints(snapshot.level, s_settings.points);
             snapshot.spent = TraitRules::SpentPoints(snapshot.allocation);
-            snapshot.unspent = TraitRules::UnspentPoints(snapshot.level, Config::traits.points, snapshot.allocation);
+            snapshot.unspent = TraitRules::UnspentPoints(snapshot.level, s_settings.points, snapshot.allocation);
         }
         return snapshot;
     }

@@ -17,11 +17,11 @@ EXPECTED = {
     ("debug", "allocation_page"): False,
     ("points", "starting_points"): 4,
     ("points", "levels_per_point"): 3,
-    ("per_point", "stamina"): 5.0,
-    ("per_point", "health"): 5.0,
-    ("per_point", "magicka"): 5.0,
+    ("per_point", "stamina_percent"): 0.05,
+    ("per_point", "health_percent"): 0.05,
+    ("per_point", "magicka_percent"): 0.05,
     ("per_point", "critical_chance"): 1.0,
-    ("per_point", "intelligence_threshold_reduction"): 0.02,
+    ("per_point", "intelligence_skill_points"): 0.25,
     ("per_point", "charisma_price_improvement"): 0.01,
 }
 

@@ -41,8 +41,8 @@ namespace ST::TraitMenu {
                 "Strength", "Resilience", "Agility", "Intelligence", "Wisdom", "Charisma"
             };
             std::array<std::string, TraitRules::kTraitCount> effects{
-                "+{value} Stamina per point", "+{value} Health per point", "",
-                "", "+{value} Magicka per point", ""
+                "+{value}% of base Stamina per point", "+{value}% of base Health per point", "",
+                "+{value} skill points per level per point, retroactive", "+{value}% of base Magicka per point", ""
             };
         };
         Text s_text;
@@ -76,6 +76,7 @@ namespace ST::TraitMenu {
             }
             translate("$ST_EFFECT_STRENGTH", s_text.effects[0]);
             translate("$ST_EFFECT_RESILIENCE", s_text.effects[1]);
+            translate("$ST_EFFECT_INTELLIGENCE", s_text.effects[3]);
             translate("$ST_EFFECT_WISDOM", s_text.effects[4]);
         }
 
@@ -92,10 +93,16 @@ namespace ST::TraitMenu {
         {
             float perPoint = 0.0f;
             switch (static_cast<Trait>(trait)) {
-                case Trait::kStrength: perPoint = Config::traits.staminaPerPoint; break;
-                case Trait::kResilience: perPoint = Config::traits.healthPerPoint; break;
-                case Trait::kWisdom: perPoint = Config::traits.magickaPerPoint; break;
-                default: return s_text.inactive;  // Agility, Intelligence, Charisma: not implemented yet
+                case Trait::kStrength: perPoint = Config::traits.staminaPercent * 100.0f; break;
+                case Trait::kResilience: perPoint = Config::traits.healthPercent * 100.0f; break;
+                case Trait::kWisdom: perPoint = Config::traits.magickaPercent * 100.0f; break;
+                case Trait::kIntelligence:
+                    if (!SALBridge::HasSkillPointBonus()) {
+                        return s_text.inactive;  // needs SAL API V3
+                    }
+                    perPoint = Config::traits.intelligenceSkillPoints;
+                    break;
+                default: return s_text.inactive;  // Agility, Charisma: not implemented yet
             }
             auto text = s_text.effects[trait];
             if (const auto pos = text.find("{value}"); pos != std::string::npos) {
@@ -337,13 +344,26 @@ namespace ST::TraitMenu {
             }
         };
 
-        // An unexpected close (another mod, a crash-guard) commits what the
-        // player previewed, like SAL's skill menu, and always resumes SAL.
+        // Watches ST's menu and the vanilla LevelUp Menu. An unexpected close
+        // of ST's menu (another mod, a crash-guard) commits what the player
+        // previewed, like SAL's skill menu, and always resumes SAL.
         struct MenuWatcher final : RE::BSTEventSink<RE::MenuOpenCloseEvent> {
             RE::BSEventNotifyControl ProcessEvent(
                 const RE::MenuOpenCloseEvent* event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
             {
-                if (!event || event->menuName != kMenuName || event->opening) {
+                if (!event || event->opening) {
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                // The vanilla attribute choice raises a base value; the
+                // percentage bonuses follow it. SAL's interim closes of the
+                // same menu reconcile to no change.
+                if (event->menuName == RE::LevelUpMenu::MENU_NAME) {
+                    if (auto* tasks = SKSE::GetTaskInterface()) {
+                        tasks->AddTask([]() { TraitState::ReconcileIfActive("level-up-menu-closed"); });
+                    }
+                    return RE::BSEventNotifyControl::kContinue;
+                }
+                if (event->menuName != kMenuName) {
                     return RE::BSEventNotifyControl::kContinue;
                 }
                 s_activeMovie = nullptr;

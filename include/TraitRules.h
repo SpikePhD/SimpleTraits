@@ -14,7 +14,7 @@ namespace ST::TraitRules {
         kStrength,      // +Stamina
         kResilience,    // +Health
         kAgility,       // +critical hit chance
-        kIntelligence,  // XP threshold multiplier via SAL
+        kIntelligence,  // extra SAL skill points per level (retroactive)
         kWisdom,        // +Magicka
         kCharisma       // fBarterMin/fBarterMax
     };
@@ -36,14 +36,16 @@ namespace ST::TraitRules {
     // Validated values from SimpleTraits.json. Defaults match the shipped file.
     struct TraitSettings {
         PointRules points{};
-        float      staminaPerPoint{ 5.0f };
-        float      healthPerPoint{ 5.0f };
-        float      magickaPerPoint{ 5.0f };
+        // Fraction of the base actor value added per point (0.05 = 5%).
+        float      staminaPercent{ 0.05f };
+        float      healthPercent{ 0.05f };
+        float      magickaPercent{ 0.05f };
         // Critical hit chance per point, in percent (1 = +1%). Not the raw
         // CriticalChance actor value: vanilla needs 10 of it per 1% (see AGENTS.md).
         float      criticalChancePerPoint{ 1.0f };
-        // Fraction of the XP threshold removed per Intelligence point.
-        float      intelligenceThresholdReduction{ 0.02f };
+        // SAL skill points per level per Intelligence point (0.25: four
+        // points give one extra skill point per level).
+        float      intelligenceSkillPoints{ 0.25f };
         // Fraction by which the barter price factor drops per Charisma point.
         float      charismaPriceImprovement{ 0.01f };
     };
@@ -80,8 +82,9 @@ namespace ST::TraitRules {
     // Bonuses
     // -------------------------------------------------------------------
 
-    // points * perPoint; a non-finite or negative perPoint grants nothing.
-    [[nodiscard]] float TraitBonus(std::uint32_t points, float perPoint) noexcept;
+    // base * percentPerPoint * points. Nothing for a non-finite or negative
+    // base or percentage, so a bad reading never produces a bonus.
+    [[nodiscard]] float PercentBonus(float base, std::uint32_t points, float percentPerPoint) noexcept;
 
     // Change needed on the permanent modifier layer to move the plugin's own
     // applied bonus to `target`. Applying it and recording `target` as the new
@@ -91,7 +94,9 @@ namespace ST::TraitRules {
 
     // -------------------------------------------------------------------
     // Actor-value bonuses applied on the permanent modifier layer.
-    // Strength -> Stamina, Resilience -> Health, Wisdom -> Magicka.
+    // Strength -> Stamina, Resilience -> Health, Wisdom -> Magicka, each a
+    // percentage of the actor value's BASE (never of other modifiers, so
+    // the plugin's own bonus cannot compound).
     // -------------------------------------------------------------------
     enum class Bonus : std::uint8_t { kStamina, kHealth, kMagicka };
     inline constexpr std::size_t kBonusCount = 3;
@@ -108,22 +113,31 @@ namespace ST::TraitRules {
     [[nodiscard]] std::uint32_t        BonusActorValueId(Bonus bonus) noexcept;
     [[nodiscard]] std::optional<Bonus> BonusFromActorValueId(std::uint32_t id) noexcept;
 
+    // Base actor values, indexed by Bonus.
+    using BaseValues = std::array<float, kBonusCount>;
+
     struct BonusPlan {
         float target{ 0.0f };  // bonus the allocation should give
         float delta{ 0.0f };   // change to apply: target - applied
-        bool  valid{ false };  // false when applied is non-finite; do not touch
+        bool  valid{ false };  // false when applied or base is unusable; do not touch
     };
 
-    // Target and delta per bonus for the given allocation and settings.
-    [[nodiscard]] std::array<BonusPlan, kBonusCount> PlanReconcile(
-        const Allocation& allocation, const TraitSettings& settings, const AppliedBonuses& applied) noexcept;
+    [[nodiscard]] float BonusPercent(Bonus bonus, const TraitSettings& settings) noexcept;
 
-    // Intelligence: multiplier on SAL's XP threshold,
-    //   clamp(1 - points * reductionPerPoint, kMinimumThresholdMultiplier, 1).
-    // SAL clamps again with its own configurable floor.
-    inline constexpr float kMinimumThresholdMultiplier = 0.5f;
-    [[nodiscard]] float IntelligenceThresholdMultiplier(
-        std::uint32_t points, float reductionPerPoint) noexcept;
+    // Target and delta per bonus for the given allocation, settings and base
+    // values. A base changing (level-up attribute choice) moves the target,
+    // so the bonus follows it retroactively.
+    [[nodiscard]] std::array<BonusPlan, kBonusCount> PlanReconcile(const Allocation& allocation,
+        const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied) noexcept;
+
+    // Intelligence, retroactive: whole SAL skill points still owed,
+    //   floor(points * perPoint * (level - 1)) - granted, at least 0,
+    // as if the current Intelligence had applied at every level-up so far.
+    // Never negative: lowering the setting never takes points back.
+    // At most kMaxSkillPointBonus per call (SAL's clamp); the rest stays owed.
+    inline constexpr std::int32_t kMaxSkillPointBonus = 1000;
+    [[nodiscard]] std::int32_t SkillPointsOwed(
+        std::uint32_t points, float perPoint, std::int64_t level, std::uint32_t granted) noexcept;
 
     // -------------------------------------------------------------------
     // Charisma: barter game settings.

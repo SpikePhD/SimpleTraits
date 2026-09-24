@@ -22,6 +22,7 @@ namespace {
     bool RegisterStep(bool (*)(std::uint32_t)) { return true; }
     void Continue() {}
     bool RegisterCreated(void (*)()) { return true; }
+    bool RegisterBonus(std::int32_t (*)(std::uint32_t)) { return true; }
 
     SAL::SALInterfaceV1 ValidInterface()
     {
@@ -84,6 +85,23 @@ int main()
     auto nullStep = v2;
     nullStep.RegisterPreSkillMenuStep = nullptr;
     Check(!HasPreSkillMenuStep(&nullStep, v2size), "null pre-step function falls back to V1");
+
+    // V3: skill point bonus detection.
+    const auto v3size = static_cast<std::uint32_t>(sizeof(SAL::SALInterfaceV3));
+    SAL::SALInterfaceV3 v3{ v2, RegisterBonus };
+    v3.v2.v1.version = SAL::kInterfaceVersion3;
+    Check(ClassifyInterfaceMessage(SAL::kMessageInterface, &v3, v3size) == InterfaceStatus::kAccepted,
+        "V3 payload accepted as an interface");
+    Check(HasPreSkillMenuStep(&v3, v3size), "V3 payload still has the V2 pre-step");
+    Check(HasSkillPointBonus(&v3, v3size), "V3 payload has the skill point bonus");
+    Check(!HasSkillPointBonus(&v2, v2size), "V2 payload has no skill point bonus");
+    Check(!HasSkillPointBonus(&v3, v3size - 1), "truncated V3 payload has no skill point bonus");
+    auto v3AsV2 = v3;
+    v3AsV2.v2.v1.version = SAL::kInterfaceVersion2;
+    Check(!HasSkillPointBonus(&v3AsV2, v3size), "version 2 with a larger payload has no skill point bonus");
+    auto nullBonus = v3;
+    nullBonus.RegisterSkillPointBonus = nullptr;
+    Check(!HasSkillPointBonus(&nullBonus, v3size), "null bonus function is not usable");
 
     Check(StatusName(InterfaceStatus::kAccepted) == "accepted", "status name");
     Check(std::string_view(SAL::kSenderName) == "SimpleAlternateLevelling", "vendored sender name");

@@ -83,12 +83,12 @@ namespace ST::TraitRules {
         return AllocationError::kNone;
     }
 
-    float TraitBonus(std::uint32_t points, float perPoint) noexcept
+    float PercentBonus(float base, std::uint32_t points, float percentPerPoint) noexcept
     {
-        if (!std::isfinite(perPoint) || perPoint <= 0.0f) {
+        if (!Positive(percentPerPoint) || !Positive(base)) {
             return 0.0f;
         }
-        return static_cast<float>(static_cast<double>(points) * perPoint);
+        return static_cast<float>(static_cast<double>(base) * percentPerPoint * static_cast<double>(points));
     }
 
     std::optional<float> ReconcileDelta(float target, float applied) noexcept
@@ -140,23 +140,27 @@ namespace ST::TraitRules {
         return std::nullopt;
     }
 
-    std::array<BonusPlan, kBonusCount> PlanReconcile(
-        const Allocation& allocation, const TraitSettings& settings, const AppliedBonuses& applied) noexcept
+    float BonusPercent(Bonus bonus, const TraitSettings& settings) noexcept
     {
-        const auto perPoint = [&settings](Bonus bonus) {
-            switch (bonus) {
-                case Bonus::kStamina: return settings.staminaPerPoint;
-                case Bonus::kHealth: return settings.healthPerPoint;
-                case Bonus::kMagicka: return settings.magickaPerPoint;
-            }
-            return 0.0f;
-        };
+        switch (bonus) {
+            case Bonus::kStamina: return settings.staminaPercent;
+            case Bonus::kHealth: return settings.healthPercent;
+            case Bonus::kMagicka: return settings.magickaPercent;
+        }
+        return 0.0f;
+    }
 
+    std::array<BonusPlan, kBonusCount> PlanReconcile(const Allocation& allocation,
+        const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied) noexcept
+    {
         std::array<BonusPlan, kBonusCount> plans{};
         for (std::size_t i = 0; i < kBonusCount; ++i) {
             const auto bonus = static_cast<Bonus>(i);
+            if (!std::isfinite(bases[i])) {
+                continue;  // unusable base: leave the applied bonus untouched
+            }
             const auto points = allocation[static_cast<std::size_t>(BonusTrait(bonus))];
-            const float target = TraitBonus(points, perPoint(bonus));
+            const float target = PercentBonus(bases[i], points, BonusPercent(bonus, settings));
             if (const auto delta = ReconcileDelta(target, applied[i])) {
                 plans[i] = { target, *delta, true };
             }
@@ -164,13 +168,19 @@ namespace ST::TraitRules {
         return plans;
     }
 
-    float IntelligenceThresholdMultiplier(std::uint32_t points, float reductionPerPoint) noexcept
+    std::int32_t SkillPointsOwed(
+        std::uint32_t points, float perPoint, std::int64_t level, std::uint32_t granted) noexcept
     {
-        if (points == 0 || !Positive(reductionPerPoint)) {
-            return 1.0f;
+        if (points == 0 || !Positive(perPoint) || level <= 1) {
+            return 0;
         }
-        const double multiplier = 1.0 - static_cast<double>(points) * reductionPerPoint;
-        return static_cast<float>(std::clamp(multiplier, static_cast<double>(kMinimumThresholdMultiplier), 1.0));
+        const auto levelUps = std::min<std::int64_t>(level - 1, std::numeric_limits<std::uint32_t>::max());
+        const double earned = std::floor(static_cast<double>(points) * perPoint * static_cast<double>(levelUps));
+        const double owed = earned - static_cast<double>(granted);
+        if (!(owed > 0.0)) {
+            return 0;
+        }
+        return static_cast<std::int32_t>(std::min(owed, static_cast<double>(kMaxSkillPointBonus)));
     }
 
     double BarterPriceFactor(const BarterSettings& settings, float speechSkill) noexcept

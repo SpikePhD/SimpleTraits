@@ -80,13 +80,15 @@ namespace {
 
     void TestBonuses()
     {
-        Check(TraitBonus(0, 5.0f) == 0.0f, "zero points");
-        Check(TraitBonus(3, 5.0f) == 15.0f, "stamina/health/magicka per point");
-        Check(Near(TraitBonus(7, 1.0f), 7.0), "critical chance percentage points");
-        Check(Near(TraitBonus(3, 0.5f), 1.5), "fractional per-point value");
-        Check(TraitBonus(3, -1.0f) == 0.0f, "negative per-point grants nothing");
-        Check(TraitBonus(3, std::numeric_limits<float>::quiet_NaN()) == 0.0f, "NaN per-point grants nothing");
-        Check(TraitBonus(3, std::numeric_limits<float>::infinity()) == 0.0f, "infinite per-point grants nothing");
+        Check(PercentBonus(100.0f, 0, 0.05f) == 0.0f, "zero points");
+        Check(Near(PercentBonus(100.0f, 1, 0.05f), 5.0), "5% of base 100 per point");
+        Check(Near(PercentBonus(300.0f, 2, 0.05f), 30.0), "grows with the base");
+        Check(Near(PercentBonus(100.0f, 3, 0.1f), 30.0), "configurable percentage");
+        Check(PercentBonus(100.0f, 3, -0.05f) == 0.0f, "negative percentage grants nothing");
+        Check(PercentBonus(100.0f, 3, std::numeric_limits<float>::quiet_NaN()) == 0.0f, "NaN percentage grants nothing");
+        Check(PercentBonus(0.0f, 3, 0.05f) == 0.0f, "zero base grants nothing");
+        Check(PercentBonus(-50.0f, 3, 0.05f) == 0.0f, "negative base grants nothing");
+        Check(PercentBonus(std::numeric_limits<float>::infinity(), 3, 0.05f) == 0.0f, "infinite base grants nothing");
 
         Check(ReconcileDelta(15.0f, 0.0f) == 15.0f, "first apply adds the full bonus");
         Check(ReconcileDelta(15.0f, 15.0f) == 0.0f, "reconcile is idempotent");
@@ -98,15 +100,31 @@ namespace {
 
     void TestIntelligence()
     {
-        Check(IntelligenceThresholdMultiplier(0, 0.02f) == 1.0f, "no points means no change");
-        Check(Near(IntelligenceThresholdMultiplier(1, 0.02f), 0.98), "one point");
-        Check(Near(IntelligenceThresholdMultiplier(10, 0.02f), 0.80), "ten points");
-        Check(Near(IntelligenceThresholdMultiplier(25, 0.02f), 0.50), "exactly at the floor");
-        Check(IntelligenceThresholdMultiplier(26, 0.02f) == kMinimumThresholdMultiplier, "clamped to 0.5");
-        Check(IntelligenceThresholdMultiplier(UINT32_MAX, 0.5f) == kMinimumThresholdMultiplier, "huge input clamped");
-        Check(IntelligenceThresholdMultiplier(5, 0.0f) == 1.0f, "zero reduction");
-        Check(IntelligenceThresholdMultiplier(5, -0.1f) == 1.0f, "negative reduction ignored");
-        Check(IntelligenceThresholdMultiplier(5, std::numeric_limits<float>::quiet_NaN()) == 1.0f, "NaN ignored");
+        // 0.25 per point per level-up; level L has had L - 1 level-ups.
+        Check(SkillPointsOwed(0, 0.25f, 10, 0) == 0, "no points, nothing owed");
+        Check(SkillPointsOwed(4, 0.25f, 1, 0) == 0, "level 1 has had no level-ups");
+        Check(SkillPointsOwed(4, 0.25f, 2, 0) == 1, "4 points: +1 per level-up");
+        Check(SkillPointsOwed(1, 0.25f, 2, 0) == 0, "fraction below one whole point");
+        Check(SkillPointsOwed(1, 0.25f, 5, 0) == 1, "fractions accumulate: 4 level-ups x 0.25");
+        Check(SkillPointsOwed(2, 0.25f, 4, 0) == 1, "2 points x 3 level-ups x 0.25 = 1.5 -> 1");
+
+        // Retroactive: a point spent at level 10 pays for the 9 earlier level-ups.
+        Check(SkillPointsOwed(4, 0.25f, 10, 0) == 9, "retroactive catch-up");
+        Check(SkillPointsOwed(4, 0.25f, 10, 9) == 0, "nothing owed once granted");
+        Check(SkillPointsOwed(4, 0.25f, 11, 9) == 1, "next level-up pays one more");
+        Check(SkillPointsOwed(5, 0.25f, 11, 9) == 3, "new point: 5 x 10 x 0.25 = 12.5 -> 12, minus 9");
+
+        // Never negative: a lower rate or fewer points never takes points back.
+        Check(SkillPointsOwed(4, 0.1f, 11, 9) == 0, "lowered rate owes nothing, takes nothing");
+        Check(SkillPointsOwed(4, 0.0f, 11, 0) == 0, "zero rate");
+        Check(SkillPointsOwed(4, -1.0f, 11, 0) == 0, "negative rate");
+        Check(SkillPointsOwed(4, std::numeric_limits<float>::quiet_NaN(), 11, 0) == 0, "NaN rate");
+
+        // Clamped to SAL's per-call maximum; the rest stays owed.
+        Check(SkillPointsOwed(10000, 1.0f, 255, 0) == kMaxSkillPointBonus, "clamped to 1000 per level-up");
+        Check(SkillPointsOwed(10000, 1.0f, 255, 1000) == kMaxSkillPointBonus, "remainder paid later");
+        Check(SkillPointsOwed(UINT32_MAX, 5.0f, std::numeric_limits<std::int64_t>::max(), 0) == kMaxSkillPointBonus,
+            "huge inputs do not overflow");
     }
 
     void TestBarter()
@@ -163,44 +181,54 @@ namespace {
 
     void TestReconcilePlan()
     {
-        TraitSettings settings{};  // 5 stamina/health/magicka per point
+        TraitSettings settings{};  // 5% of base per point
         // Strength 2, Resilience 1, Agility 3, Intelligence 4, Wisdom 0, Charisma 5.
         const Allocation allocation{ 2, 1, 3, 4, 0, 5 };
+        const BaseValues bases{ 100.0f, 150.0f, 100.0f };  // Stamina, Health, Magicka
         const AppliedBonuses none{};
-
-        const auto first = PlanReconcile(allocation, settings, none);
         const auto stamina = static_cast<std::size_t>(Bonus::kStamina);
         const auto health = static_cast<std::size_t>(Bonus::kHealth);
         const auto magicka = static_cast<std::size_t>(Bonus::kMagicka);
-        Check(first[stamina].valid && first[stamina].target == 10.0f && first[stamina].delta == 10.0f,
-            "Strength 2 -> +10 Stamina");
-        Check(first[health].target == 5.0f && first[health].delta == 5.0f, "Resilience 1 -> +5 Health");
+
+        const auto first = PlanReconcile(allocation, settings, bases, none);
+        Check(first[stamina].valid && Near(first[stamina].target, 10.0) && Near(first[stamina].delta, 10.0),
+            "Strength 2 -> +10% of base 100 Stamina");
+        Check(Near(first[health].target, 7.5) && Near(first[health].delta, 7.5), "Resilience 1 -> +5% of base 150 Health");
         Check(first[magicka].target == 0.0f && first[magicka].delta == 0.0f, "Wisdom 0 -> no Magicka");
 
         // Applying the plan and recording the targets makes the next plan a no-op.
         const AppliedBonuses applied{ first[0].target, first[1].target, first[2].target };
-        const auto second = PlanReconcile(allocation, settings, applied);
-        for (const auto& plan : second) {
+        for (const auto& plan : PlanReconcile(allocation, settings, bases, applied)) {
             Check(plan.valid && plan.delta == 0.0f, "reconcile is idempotent");
         }
 
-        // Lowering a per-point setting removes only ST's own excess.
-        settings.staminaPerPoint = 3.0f;
-        const auto lowered = PlanReconcile(allocation, settings, applied);
-        Check(lowered[stamina].target == 6.0f && lowered[stamina].delta == -4.0f, "lower setting shrinks the bonus");
+        // A higher base (level-up attribute choice) raises the bonus retroactively.
+        const BaseValues grown{ 100.0f, 160.0f, 100.0f };
+        const auto afterLevelUp = PlanReconcile(allocation, settings, grown, applied);
+        Check(Near(afterLevelUp[health].target, 8.0) && Near(afterLevelUp[health].delta, 0.5), "bonus follows the base");
+        Check(afterLevelUp[stamina].delta == 0.0f, "unchanged base, unchanged bonus");
+
+        // Migration from Phase 2 flat bonuses: applied +5 becomes 5% of base.
+        const AppliedBonuses flat{ 10.0f, 5.0f, 0.0f };
+        const auto migrated = PlanReconcile(allocation, settings, bases, flat);
+        Check(Near(migrated[health].delta, 2.5), "flat +5 on base 150 moves to 7.5");
+        Check(migrated[stamina].delta == 0.0f, "flat +10 on base 100 equals 10%");
+
+        // Lowering a percentage removes only the plugin's own excess.
+        settings.staminaPercent = 0.03f;
+        const auto lowered = PlanReconcile(allocation, settings, bases, applied);
+        Check(Near(lowered[stamina].target, 6.0) && Near(lowered[stamina].delta, -4.0), "lower setting shrinks the bonus");
         Check(lowered[health].delta == 0.0f, "other bonuses unaffected");
 
-        // A setting of 0 removes exactly what was applied.
-        settings.healthPerPoint = 0.0f;
-        const auto zeroed = PlanReconcile(allocation, settings, applied);
-        Check(zeroed[health].target == 0.0f && zeroed[health].delta == -5.0f, "zero setting removes the bonus");
-
-        // A non-finite recorded amount is never touched.
+        // Unusable inputs are never touched.
         AppliedBonuses corrupt = applied;
         corrupt[magicka] = std::numeric_limits<float>::quiet_NaN();
-        const auto guarded = PlanReconcile(allocation, TraitSettings{}, corrupt);
+        const auto guarded = PlanReconcile(allocation, TraitSettings{}, bases, corrupt);
         Check(!guarded[magicka].valid, "non-finite applied amount is not reconciled");
         Check(guarded[stamina].valid, "other bonuses still reconciled");
+        const BaseValues badBase{ std::numeric_limits<float>::quiet_NaN(), 150.0f, 100.0f };
+        Check(!PlanReconcile(allocation, TraitSettings{}, badBase, applied)[stamina].valid,
+            "non-finite base leaves the bonus untouched");
 
         Check(BonusTrait(Bonus::kStamina) == Trait::kStrength, "Stamina comes from Strength");
         Check(BonusTrait(Bonus::kHealth) == Trait::kResilience, "Health comes from Resilience");
