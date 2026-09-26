@@ -14,7 +14,7 @@ namespace ST::TraitRules {
         kStrength,      // +Stamina
         kResilience,    // +Health
         kAgility,       // +critical hit chance
-        kIntelligence,  // extra SAL skill points per level (retroactive)
+        kIntelligence,  // XP multiplier for every SAL XP award
         kWisdom,        // +Magicka
         kCharisma       // fBarterMin/fBarterMax
     };
@@ -43,9 +43,9 @@ namespace ST::TraitRules {
         // Critical hit chance per point, in percent (1 = +1%). Not the raw
         // CriticalChance actor value: vanilla needs 10 of it per 1% (see AGENTS.md).
         float      criticalChancePerPoint{ 1.0f };
-        // SAL skill points per level per Intelligence point (0.25: four
-        // points give one extra skill point per level).
-        float      intelligenceSkillPoints{ 0.25f };
+        // Extra XP per Intelligence point, as a fraction (0.10: ten points
+        // double every XP award).
+        float      intelligenceXPPercent{ 0.10f };
         // Fraction by which the barter price factor drops per Charisma point.
         float      charismaPriceImprovement{ 0.01f };
     };
@@ -143,14 +143,12 @@ namespace ST::TraitRules {
         const TraitSettings& settings, const BaseValues& bases, const AppliedBonuses& applied,
         float criticalChancePerPercent = kVanillaCriticalChancePerPercent) noexcept;
 
-    // Intelligence, retroactive: whole SAL skill points still owed,
-    //   floor(points * perPoint * (level - 1)) - granted, at least 0,
-    // as if the current Intelligence had applied at every level-up so far.
-    // Never negative: lowering the setting never takes points back.
-    // At most kMaxSkillPointBonus per call (SAL's clamp); the rest stays owed.
-    inline constexpr std::int32_t kMaxSkillPointBonus = 1000;
-    [[nodiscard]] std::int32_t SkillPointsOwed(
-        std::uint32_t points, float perPoint, std::int64_t level, std::uint32_t granted) noexcept;
+    // Intelligence: multiplier SAL applies to each XP award as it is earned,
+    //   1 + points * percentPerPoint   (0.10 per point: 10 points = 2x).
+    // Linear and uncapped. 1.0 for a non-finite or negative percentage, so a
+    // bad setting never reduces XP. Nothing is granted or stored: the value
+    // only affects XP earned while it is in force.
+    [[nodiscard]] float XPMultiplier(std::uint32_t points, float percentPerPoint) noexcept;
 
     // -------------------------------------------------------------------
     // Charisma: barter game settings.

@@ -59,8 +59,8 @@ namespace ST::Config {
             traits.healthPercent = static_cast<float>(Number(j, "per_point", "health_percent"));
             traits.magickaPercent = static_cast<float>(Number(j, "per_point", "magicka_percent"));
             traits.criticalChancePerPoint = static_cast<float>(Number(j, "per_point", "critical_chance"));
-            traits.intelligenceSkillPoints =
-                static_cast<float>(Number(j, "per_point", "intelligence_skill_points"));
+            traits.intelligenceXPPercent =
+                static_cast<float>(Number(j, "per_point", "intelligence_xp_percent"));
             traits.charismaPriceImprovement =
                 static_cast<float>(Number(j, "per_point", "charisma_price_improvement"));
         }
@@ -153,8 +153,8 @@ namespace ST::Config {
         logger::info("[ST] Config: per point - stamina={:.1f}%, health={:.1f}%, magicka={:.1f}% of base; critical_chance={:.2f}%",
             traits.staminaPercent * 100.0f, traits.healthPercent * 100.0f, traits.magickaPercent * 100.0f,
             traits.criticalChancePerPoint);
-        logger::info("[ST] Config: per point - intelligence_skill_points={:.3f}, charisma_price_improvement={:.4f}",
-            traits.intelligenceSkillPoints, traits.charismaPriceImprovement);
+        logger::info("[ST] Config: per point - intelligence_xp_percent={:.2f}, charisma_price_improvement={:.4f}",
+            traits.intelligenceXPPercent, traits.charismaPriceImprovement);
     }
 
     void LogReport(const LoadReport& report)

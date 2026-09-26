@@ -21,7 +21,7 @@ EXPECTED = {
     ("per_point", "health_percent"): 0.05,
     ("per_point", "magicka_percent"): 0.05,
     ("per_point", "critical_chance"): 1.0,
-    ("per_point", "intelligence_skill_points"): 0.25,
+    ("per_point", "intelligence_xp_percent"): 0.10,
     ("per_point", "charisma_price_improvement"): 0.01,
 }
 

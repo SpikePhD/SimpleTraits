@@ -19,7 +19,7 @@ namespace ST {
             SettingDescriptor{ "per_point.health_percent", SettingKind::Number, 0, 1, 0.05, 0.01 },
             SettingDescriptor{ "per_point.magicka_percent", SettingKind::Number, 0, 1, 0.05, 0.01 },
             SettingDescriptor{ "per_point.critical_chance", SettingKind::Number, 0, 10, 1, 0.5 },
-            SettingDescriptor{ "per_point.intelligence_skill_points", SettingKind::Number, 0, 5, 0.25, 0.05 },
+            SettingDescriptor{ "per_point.intelligence_xp_percent", SettingKind::Number, 0, 0.5, 0.1, 0.01, 2 },
             SettingDescriptor{ "per_point.charisma_price_improvement", SettingKind::Number, 0, 0.05, 0.01, 0.005 },
             SettingDescriptor{ "debug.verbose", SettingKind::Toggle, 0, 1, 0, 1 },
             SettingDescriptor{ "debug.max_log_files", SettingKind::Integer, 0, 1000, 10, 1 },
@@ -74,6 +74,25 @@ namespace ST {
                 case SettingKind::Number: break;
             }
             return Json(descriptor.builtInDefault);
+        }
+
+        // Keys from earlier versions: ignored with an explanation instead of
+        // the generic unknown-key warning. Saving drops them from the user file.
+        struct RetiredSetting {
+            std::string_view key;
+            std::string_view reason;
+        };
+        constexpr std::array kRetired{
+            RetiredSetting{ "per_point.intelligence_skill_points",
+                "Intelligence now multiplies XP; see per_point.intelligence_xp_percent" },
+        };
+
+        const RetiredSetting* FindRetired(std::string_view key)
+        {
+            for (const auto& retired : kRetired) {
+                if (retired.key == key) return &retired;
+            }
+            return nullptr;
         }
 
         bool IsRegistered(std::string_view key)
@@ -198,6 +217,8 @@ namespace ST {
                     const auto key = prefix.empty() ? it.key() : prefix + "." + it.key();
                     if (it.value().is_object()) {
                         visit(it.value(), key);
+                    } else if (const auto* retired = FindRetired(key)) {
+                        Warn(warnings, "retired setting ignored: " + key + " (" + std::string(retired->reason) + ")");
                     } else if (!IsRegistered(key)) {
                         Warn(warnings, "unknown override ignored: " + key);
                     }

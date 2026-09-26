@@ -18,7 +18,7 @@ namespace ST::TraitState {
         std::int64_t               unspent{ 0 };
         TraitRules::Allocation     allocation{};
         TraitRules::AppliedBonuses applied{};
-        std::uint32_t              skillPointsGranted{ 0 };
+        float                      xpMultiplier{ 1.0f };      // Intelligence
         float                      priceFactorScale{ 1.0f };  // Charisma, before the 1.0 floor
     };
 
@@ -47,10 +47,10 @@ namespace ST::TraitState {
     // Config::Load and after every settings change, then reconcile.
     void SetSettings(const TraitRules::TraitSettings& settings);
 
-    // Main thread; SAL's skill point bonus provider. Returns the whole SAL
-    // skill points Intelligence still owes at `level` (retroactive, never
-    // negative) and records them as granted in the cosave.
-    [[nodiscard]] std::int32_t TakeSkillPointBonus(std::uint32_t level);
+    // SAL's XP multiplier provider (SAL API V4), called on the main thread
+    // for every XP award. Returns Intelligence's current multiplier; cheap
+    // and lock-free. `sourceCategory` (SAL::kXPSource*) is ignored for now.
+    [[nodiscard]] float XPMultiplier(std::uint32_t sourceCategory);
 
     // Main thread. Replaces the allocation with `proposed` when
     // ValidateAllocation allows it (no decreases, never more than unspent),

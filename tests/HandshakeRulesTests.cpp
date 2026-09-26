@@ -23,6 +23,7 @@ namespace {
     void Continue() {}
     bool RegisterCreated(void (*)()) { return true; }
     bool RegisterBonus(std::int32_t (*)(std::uint32_t)) { return true; }
+    bool RegisterMultiplier(float (*)(std::uint32_t)) { return true; }
 
     SAL::SALInterfaceV1 ValidInterface()
     {
@@ -86,22 +87,27 @@ int main()
     nullStep.RegisterPreSkillMenuStep = nullptr;
     Check(!HasPreSkillMenuStep(&nullStep, v2size), "null pre-step function falls back to V1");
 
-    // V3: skill point bonus detection.
+    // V4: XP multiplier detection. V3's skill point bonus is no longer used.
     const auto v3size = static_cast<std::uint32_t>(sizeof(SAL::SALInterfaceV3));
     SAL::SALInterfaceV3 v3{ v2, RegisterBonus };
     v3.v2.v1.version = SAL::kInterfaceVersion3;
-    Check(ClassifyInterfaceMessage(SAL::kMessageInterface, &v3, v3size) == InterfaceStatus::kAccepted,
-        "V3 payload accepted as an interface");
-    Check(HasPreSkillMenuStep(&v3, v3size), "V3 payload still has the V2 pre-step");
-    Check(HasSkillPointBonus(&v3, v3size), "V3 payload has the skill point bonus");
-    Check(!HasSkillPointBonus(&v2, v2size), "V2 payload has no skill point bonus");
-    Check(!HasSkillPointBonus(&v3, v3size - 1), "truncated V3 payload has no skill point bonus");
-    auto v3AsV2 = v3;
-    v3AsV2.v2.v1.version = SAL::kInterfaceVersion2;
-    Check(!HasSkillPointBonus(&v3AsV2, v3size), "version 2 with a larger payload has no skill point bonus");
-    auto nullBonus = v3;
-    nullBonus.RegisterSkillPointBonus = nullptr;
-    Check(!HasSkillPointBonus(&nullBonus, v3size), "null bonus function is not usable");
+    const auto v4size = static_cast<std::uint32_t>(sizeof(SAL::SALInterfaceV4));
+    SAL::SALInterfaceV4 v4{ v3, RegisterMultiplier };
+    v4.v3.v2.v1.version = SAL::kInterfaceVersion4;
+    Check(ClassifyInterfaceMessage(SAL::kMessageInterface, &v4, v4size) == InterfaceStatus::kAccepted,
+        "V4 payload accepted as an interface");
+    Check(HasPreSkillMenuStep(&v4, v4size), "V4 payload still has the V2 pre-step");
+    Check(HasXPMultiplier(&v4, v4size), "V4 payload has the XP multiplier");
+    Check(!HasXPMultiplier(&v3, v3size), "V3 payload has no XP multiplier");
+    Check(!HasXPMultiplier(&v4, v4size - 1), "truncated V4 payload has no XP multiplier");
+    Check(!HasXPMultiplier(nullptr, v4size), "null data has no XP multiplier");
+    auto v4AsV3 = v4;
+    v4AsV3.v3.v2.v1.version = SAL::kInterfaceVersion3;
+    Check(!HasXPMultiplier(&v4AsV3, v4size), "version 3 with a larger payload has no XP multiplier");
+    auto nullMultiplier = v4;
+    nullMultiplier.RegisterXPMultiplier = nullptr;
+    Check(!HasXPMultiplier(&nullMultiplier, v4size), "null multiplier function is not usable");
+    Check(SAL::kXPSourceQuest == 0 && SAL::kXPSourcePickpocket == 5, "vendored XP source categories");
 
     Check(StatusName(InterfaceStatus::kAccepted) == "accepted", "status name");
     Check(std::string_view(SAL::kSenderName) == "SimpleAlternateLevelling", "vendored sender name");

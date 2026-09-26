@@ -13,7 +13,9 @@
 //
 // Record 'TRTS' v2, little-endian:
 //   uint32 allocation[6]              indexed by TraitRules::Trait
-//   uint32 skillPointsGranted         Intelligence bonus handed to SAL so far
+//   uint32 skillPointsGranted         legacy: SAL skill points granted by the old
+//                                     Intelligence (before it became an XP
+//                                     multiplier); kept and written back unchanged
 //   uint32 appliedCount               0..kMaxAppliedEntries
 //   { uint32 actorValueId, float32 amount } x appliedCount
 // v1 is the same without skillPointsGranted and is still read (granted = 0).

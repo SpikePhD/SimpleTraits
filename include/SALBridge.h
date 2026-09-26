@@ -41,12 +41,12 @@ namespace ST::SALBridge {
     // later. Returns false when SAL is unavailable or rejects it.
     bool RegisterLevelUpStep(bool (*wantsStep)(std::uint32_t level));
 
-    // True when SAL offers the V3 skill point bonus (Intelligence).
-    [[nodiscard]] bool HasSkillPointBonus() noexcept;
+    // True when SAL offers the V4 XP multiplier (Intelligence).
+    [[nodiscard]] bool HasXPMultiplier() noexcept;
 
-    // Registers the Intelligence skill point provider with SAL V3. Returns
+    // Registers the Intelligence XP multiplier provider with SAL V4. Returns
     // false (logged) when SAL does not offer it or rejects it.
-    bool RegisterSkillPointBonus(std::int32_t (*bonus)(std::uint32_t level));
+    bool RegisterXPMultiplier(float (*provider)(std::uint32_t sourceCategory));
 
     // Resumes SAL's level-up after ST's step. Call exactly once per wait
     // (TraitMenuRules::ContinuationGuard); SAL does the work on the main thread.

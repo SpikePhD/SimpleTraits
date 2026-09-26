@@ -97,12 +97,15 @@ namespace ST::SettingsPage {
         std::string Label(std::string_view key) { return T("$ST_SETTING_" + Token(key), key); }
         std::string Description(std::string_view key) { return T("$ST_DESC_" + Token(key), ""); }
 
-        std::string Format(const Json* value)
+        std::string Format(const Json* value, int decimals = -1)
         {
             if (!value) return "?";
             if (value->is_boolean()) return value->get<bool>() ? T("$ST_PAGE_ON", "On") : T("$ST_PAGE_OFF", "Off");
             if (value->is_number_integer()) return std::to_string(value->get<std::int64_t>());
-            if (value->is_number()) return std::format("{:g}", value->get<double>());
+            if (value->is_number()) {
+                return decimals >= 0 ? std::format("{:.{}f}", value->get<double>(), decimals)
+                                     : std::format("{:g}", value->get<double>());
+            }
             return value->dump();
         }
 
@@ -154,10 +157,11 @@ namespace ST::SettingsPage {
         void Tooltip(std::string_view key)
         {
             if (!ImGui::IsItemHovered()) return;
+            const auto* descriptor = SettingsModel::Find(key);
             std::string text = Description(key);
             if (!text.empty()) text += "\n\n";
             text += T("$ST_PAGE_DEFAULT", "Default") + ": " +
-                    Format(SettingsModel::Value(Config::Settings().Shipped(), key));
+                    Format(SettingsModel::Value(Config::Settings().Shipped(), key), descriptor ? descriptor->decimals : -1);
             ImGui::SetTooltip("%s", text.c_str());
         }
 
@@ -176,7 +180,8 @@ namespace ST::SettingsPage {
                 changed = ImGui::InputInt("##value", &asInt, 1, 10);
                 value = asInt;
             } else {
-                changed = ImGui::InputDouble("##value", &value, descriptor.step, descriptor.step * 10.0, "%g");
+                const auto format = descriptor.decimals >= 0 ? std::format("%.{}f", descriptor.decimals) : std::string("%g");
+                changed = ImGui::InputDouble("##value", &value, descriptor.step, descriptor.step * 10.0, format.c_str());
             }
             if (changed) s_editing[id] = value;
             if (ImGui::IsItemDeactivatedAfterEdit() && s_editing.contains(id)) {
@@ -184,7 +189,10 @@ namespace ST::SettingsPage {
                 s_editing.erase(id);
                 // Six significant digits drop step noise (0.1 + 0.2 style) so
                 // the user file stores 0.03, not 0.030000000000000002.
-                const double tidy = std::stod(std::format("{:.6g}", edited));
+                // Fixed-decimal settings are rounded to what the page shows.
+                const double tidy = descriptor.decimals >= 0
+                    ? std::stod(std::format("{:.{}f}", edited, descriptor.decimals))
+                    : std::stod(std::format("{:.6g}", edited));
                 Commit(descriptor.key, integer ? Json(static_cast<std::int64_t>(std::llround(edited))) : Json(tidy));
             }
             Tooltip(descriptor.key);

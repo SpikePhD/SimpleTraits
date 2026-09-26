@@ -112,7 +112,7 @@ namespace {
         }
         ST::DiagnosticSinks::Register();
         ST::TraitMenu::Register();
-        ST::SALBridge::RegisterSkillPointBonus(ST::TraitState::TakeSkillPointBonus);
+        ST::SALBridge::RegisterXPMultiplier(ST::TraitState::XPMultiplier);
         ST::SettingsPage::Register();
         ST::DebugPage::Register();
         logger::info("[ST] All systems initialised (SAL {}).", ST::SALBridge::StateName(ST::SALBridge::GetState()));

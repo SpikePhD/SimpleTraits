@@ -189,19 +189,13 @@ namespace ST::TraitRules {
         return plans;
     }
 
-    std::int32_t SkillPointsOwed(
-        std::uint32_t points, float perPoint, std::int64_t level, std::uint32_t granted) noexcept
+    float XPMultiplier(std::uint32_t points, float percentPerPoint) noexcept
     {
-        if (points == 0 || !Positive(perPoint) || level <= 1) {
-            return 0;
+        if (points == 0 || !Positive(percentPerPoint)) {
+            return 1.0f;
         }
-        const auto levelUps = std::min<std::int64_t>(level - 1, std::numeric_limits<std::uint32_t>::max());
-        const double earned = std::floor(static_cast<double>(points) * perPoint * static_cast<double>(levelUps));
-        const double owed = earned - static_cast<double>(granted);
-        if (!(owed > 0.0)) {
-            return 0;
-        }
-        return static_cast<std::int32_t>(std::min(owed, static_cast<double>(kMaxSkillPointBonus)));
+        const double multiplier = 1.0 + static_cast<double>(points) * percentPerPoint;
+        return static_cast<float>(std::min(multiplier, static_cast<double>(std::numeric_limits<float>::max())));
     }
 
     double BarterPriceFactor(const BarterSettings& settings, float speechSkill) noexcept

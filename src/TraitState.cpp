@@ -5,6 +5,7 @@
 #include "TraitSave.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <mutex>
 #include <optional>
@@ -33,6 +34,22 @@ namespace ST::TraitState {
         // change by another mod is detected and adopted as the new original.
         std::optional<TraitRules::BarterSettings> s_barterOriginal;
         std::optional<TraitRules::BarterSettings> s_barterWritten;
+
+        // Intelligence: SAL asks for the XP multiplier on every award (main
+        // thread). It is published here whenever the allocation or settings
+        // change, so the provider never takes s_mutex.
+        std::atomic<float> s_xpMultiplier{ 1.0f };
+
+        // Caller holds s_mutex.
+        void PublishXPMultiplierLocked()
+        {
+            const auto intelligence = s_state.allocation[static_cast<std::size_t>(TraitRules::Trait::kIntelligence)];
+            const auto multiplier = TraitRules::XPMultiplier(intelligence, s_settings.intelligenceXPPercent);
+            if (s_xpMultiplier.exchange(multiplier) != multiplier) {
+                logger::info("[ST] Intelligence: {} points x {:.2f}: XP x{:.2f}.",
+                    intelligence, s_settings.intelligenceXPPercent, multiplier);
+            }
+        }
 
         RE::Setting* GameSetting(const char* name)
         {
@@ -145,10 +162,10 @@ namespace ST::TraitState {
                 }
             }
             logger::info("[ST] State ({}): level {}, earned {}, spent {}, unspent {}; points {}; ST applied {}; "
-                         "skill points granted {}; {}.",
+                         "XP x{:.2f}; {}.",
                 reason, level, TraitRules::EarnedPoints(level, points), TraitRules::SpentPoints(s_state.allocation),
                 TraitRules::UnspentPoints(level, points, s_state.allocation), DescribeAllocation(s_state.allocation),
-                DescribeApplied(s_state.applied), s_state.skillPointsGranted, values);
+                DescribeApplied(s_state.applied), s_xpMultiplier.load(), values);
         }
 
         // Caller holds s_mutex. With quietWhenUnchanged, a reconcile that
@@ -217,7 +234,7 @@ namespace ST::TraitState {
                 logger::error("[ST] Cosave: failed to write the trait record.");
                 return;
             }
-            logger::info("[ST] Cosave v{}: saved {}; applied {}; skill points granted {}.", TraitSave::kVersion,
+            logger::info("[ST] Cosave v{}: saved {}; applied {}; legacy skill points granted {}.", TraitSave::kVersion,
                 DescribeAllocation(s_state.allocation), DescribeApplied(s_state.applied), s_state.skillPointsGranted);
         }
 
@@ -228,6 +245,7 @@ namespace ST::TraitState {
             s_gameActive = false;
             if (!intfc) {
                 logger::error("[ST] Cosave: load callback received a null interface; state reset.");
+                PublishXPMultiplierLocked();
                 return;
             }
 
@@ -261,11 +279,12 @@ namespace ST::TraitState {
 
             if (accepted) {
                 s_state = *accepted;
-                logger::info("[ST] Cosave: restored {}; applied {}; skill points granted {}.",
+                logger::info("[ST] Cosave: restored {}; applied {}; legacy skill points granted {}.",
                     DescribeAllocation(s_state.allocation), DescribeApplied(s_state.applied), s_state.skillPointsGranted);
             } else {
                 logger::info("[ST] Cosave: no trait record; starting with no allocations and nothing applied.");
             }
+            PublishXPMultiplierLocked();
         }
 
         void OnGameRevert(SKSE::SerializationInterface*)
@@ -273,6 +292,7 @@ namespace ST::TraitState {
             std::lock_guard lock(s_mutex);
             s_state = {};
             s_gameActive = false;
+            PublishXPMultiplierLocked();
             // Game settings outlive the save: put the original prices back.
             if (s_barterOriginal) {
                 WriteBarter(*s_barterOriginal);
@@ -301,6 +321,7 @@ namespace ST::TraitState {
         std::lock_guard lock(s_mutex);
         s_state = {};
         s_gameActive = true;
+        PublishXPMultiplierLocked();
         logger::info("[ST] New game: no trait allocations.");
         LogStateLocked("new-game");
     }
@@ -339,20 +360,15 @@ namespace ST::TraitState {
     {
         std::lock_guard lock(s_mutex);
         s_settings = settings;
+        PublishXPMultiplierLocked();
     }
 
-    std::int32_t TakeSkillPointBonus(std::uint32_t level)
+    float XPMultiplier(std::uint32_t sourceCategory)
     {
-        std::lock_guard lock(s_mutex);
-        const auto intelligence = s_state.allocation[static_cast<std::size_t>(TraitRules::Trait::kIntelligence)];
-        const auto owed = TraitRules::SkillPointsOwed(
-            intelligence, s_settings.intelligenceSkillPoints, level, s_state.skillPointsGranted);
-        if (owed > 0) {
-            s_state.skillPointsGranted += static_cast<std::uint32_t>(owed);
-        }
-        logger::info("[ST] Intelligence: level {}, {} points x {:.3f}/level: +{} skill points (granted {} in total).",
-            level, intelligence, s_settings.intelligenceSkillPoints, owed, s_state.skillPointsGranted);
-        return owed;
+        // Every source category gets the same bonus for now.
+        const auto multiplier = s_xpMultiplier.load();
+        logger::debug("[ST] Intelligence: XP award (source {}) x{:.2f}.", sourceCategory, multiplier);
+        return multiplier;
     }
 
     std::optional<TraitRules::AllocationError> CommitAllocation(
@@ -378,6 +394,7 @@ namespace ST::TraitState {
         logger::info("[ST] Commit ({}): {} -> {}.", source, DescribeAllocation(s_state.allocation),
             DescribeAllocation(proposed));
         s_state.allocation = proposed;
+        PublishXPMultiplierLocked();
         ReconcileLocked(source);
         return result;
     }
@@ -404,7 +421,7 @@ namespace ST::TraitState {
         snapshot.gameActive = s_gameActive;
         snapshot.allocation = s_state.allocation;
         snapshot.applied = s_state.applied;
-        snapshot.skillPointsGranted = s_state.skillPointsGranted;
+        snapshot.xpMultiplier = s_xpMultiplier.load();
         const auto charisma = s_state.allocation[static_cast<std::size_t>(TraitRules::Trait::kCharisma)];
         snapshot.priceFactorScale = static_cast<float>(
             std::max(0.0, 1.0 - static_cast<double>(charisma) * std::max(0.0f, s_settings.charismaPriceImprovement)));

@@ -10,7 +10,7 @@ namespace ST::SALBridge {
         std::atomic<State>                      s_state{ State::kPending };
         std::atomic<const SAL::SALInterfaceV1*> s_interface{ nullptr };
         std::atomic<const SAL::SALInterfaceV2*> s_interfaceV2{ nullptr };  // set only for a usable V2
-        std::atomic<const SAL::SALInterfaceV3*> s_interfaceV3{ nullptr };  // set only for a usable V3
+        std::atomic<const SAL::SALInterfaceV4*> s_interfaceV4{ nullptr };  // set only for a usable V4
         bool                                    s_finalized{ false };
 
         void OnSALMessage(SKSE::MessagingInterface::Message* msg)
@@ -43,14 +43,14 @@ namespace ST::SALBridge {
             if (v2) {
                 s_interfaceV2 = static_cast<const SAL::SALInterfaceV2*>(msg->data);
             }
-            const bool v3 = HandshakeRules::HasSkillPointBonus(msg->data, msg->dataLen);
-            if (v3) {
-                s_interfaceV3 = static_cast<const SAL::SALInterfaceV3*>(msg->data);
+            const bool v4 = HandshakeRules::HasXPMultiplier(msg->data, msg->dataLen);
+            if (v4) {
+                s_interfaceV4 = static_cast<const SAL::SALInterfaceV4*>(msg->data);
             }
             s_state = State::kReady;
-            logger::info("[ST] SAL: interface V{} received ({} bytes); pre-skill-menu step {}; skill point bonus {}.",
+            logger::info("[ST] SAL: interface V{} received ({} bytes); pre-skill-menu step {}; XP multiplier {}.",
                 api->version, msg->dataLen, v2 ? "available" : "unavailable (V1 step fallback)",
-                v3 ? "available" : "unavailable (Intelligence has no effect)");
+                v4 ? "available" : "unavailable (Intelligence has no effect; needs SAL API V4)");
         }
     }
 
@@ -143,23 +143,23 @@ namespace ST::SALBridge {
         return ok;
     }
 
-    bool HasSkillPointBonus() noexcept
+    bool HasXPMultiplier() noexcept
     {
-        return IsAvailable() && s_interfaceV3.load() != nullptr;
+        return IsAvailable() && s_interfaceV4.load() != nullptr;
     }
 
-    bool RegisterSkillPointBonus(std::int32_t (*bonus)(std::uint32_t level))
+    bool RegisterXPMultiplier(float (*provider)(std::uint32_t sourceCategory))
     {
-        const auto* v3 = HasSkillPointBonus() ? s_interfaceV3.load() : nullptr;
-        if (!v3) {
-            logger::warn("[ST] SAL: no skill point bonus hook (SAL API V3); Intelligence has no effect.");
+        const auto* v4 = HasXPMultiplier() ? s_interfaceV4.load() : nullptr;
+        if (!v4) {
+            logger::warn("[ST] SAL: no XP multiplier hook (SAL API V4); Intelligence has no effect.");
             return false;
         }
-        if (!v3->RegisterSkillPointBonus(bonus)) {
-            logger::error("[ST] SAL: skill point bonus rejected by SAL; Intelligence has no effect.");
+        if (!v4->RegisterXPMultiplier(provider)) {
+            logger::error("[ST] SAL: XP multiplier rejected by SAL; Intelligence has no effect.");
             return false;
         }
-        logger::info("[ST] SAL: skill point bonus registered (Intelligence).");
+        logger::info("[ST] SAL: XP multiplier registered (Intelligence).");
         return true;
     }
 

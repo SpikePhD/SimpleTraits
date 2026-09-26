@@ -17,6 +17,7 @@ namespace ST {
         double           maximum;
         double           builtInDefault;  // Toggle: 0 or 1
         double           step{ 1 };       // settings page +/- step
+        int              decimals{ -1 };  // settings page: fixed decimals, rounded on commit; -1 = as typed
     };
 
     // Layers SimpleTraits.json (shipped defaults) and SimpleTraits.user.json

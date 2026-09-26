@@ -64,7 +64,7 @@ namespace ST::DebugPage {
                 }
             }
             if (trait == Trait::kIntelligence) {
-                return std::format("{} skill points granted", snapshot.skillPointsGranted);
+                return std::format("XP x{:.2f}", snapshot.xpMultiplier);
             }
             if (trait == Trait::kCharisma) {
                 return std::format("price factor x{:.3f}", snapshot.priceFactorScale);

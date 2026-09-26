@@ -100,31 +100,21 @@ namespace {
 
     void TestIntelligence()
     {
-        // 0.25 per point per level-up; level L has had L - 1 level-ups.
-        Check(SkillPointsOwed(0, 0.25f, 10, 0) == 0, "no points, nothing owed");
-        Check(SkillPointsOwed(4, 0.25f, 1, 0) == 0, "level 1 has had no level-ups");
-        Check(SkillPointsOwed(4, 0.25f, 2, 0) == 1, "4 points: +1 per level-up");
-        Check(SkillPointsOwed(1, 0.25f, 2, 0) == 0, "fraction below one whole point");
-        Check(SkillPointsOwed(1, 0.25f, 5, 0) == 1, "fractions accumulate: 4 level-ups x 0.25");
-        Check(SkillPointsOwed(2, 0.25f, 4, 0) == 1, "2 points x 3 level-ups x 0.25 = 1.5 -> 1");
+        // 1 + points * percent: 0.10 per point, so 10 points double XP.
+        Check(XPMultiplier(0, 0.10f) == 1.0f, "no points, no bonus");
+        Check(Near(XPMultiplier(1, 0.10f), 1.1f), "1 point: x1.1");
+        Check(Near(XPMultiplier(10, 0.10f), 2.0f), "10 points: x2");
+        Check(Near(XPMultiplier(4, 0.25f), 2.0f), "4 points at 0.25: x2");
+        Check(Near(XPMultiplier(20, 0.50f), 11.0f), "uncapped: 20 points at 0.50: x11");
+        Check(Near(XPMultiplier(3, 0.01f), 1.03f), "fractional percent");
 
-        // Retroactive: a point spent at level 10 pays for the 9 earlier level-ups.
-        Check(SkillPointsOwed(4, 0.25f, 10, 0) == 9, "retroactive catch-up");
-        Check(SkillPointsOwed(4, 0.25f, 10, 9) == 0, "nothing owed once granted");
-        Check(SkillPointsOwed(4, 0.25f, 11, 9) == 1, "next level-up pays one more");
-        Check(SkillPointsOwed(5, 0.25f, 11, 9) == 3, "new point: 5 x 10 x 0.25 = 12.5 -> 12, minus 9");
-
-        // Never negative: a lower rate or fewer points never takes points back.
-        Check(SkillPointsOwed(4, 0.1f, 11, 9) == 0, "lowered rate owes nothing, takes nothing");
-        Check(SkillPointsOwed(4, 0.0f, 11, 0) == 0, "zero rate");
-        Check(SkillPointsOwed(4, -1.0f, 11, 0) == 0, "negative rate");
-        Check(SkillPointsOwed(4, std::numeric_limits<float>::quiet_NaN(), 11, 0) == 0, "NaN rate");
-
-        // Clamped to SAL's per-call maximum; the rest stays owed.
-        Check(SkillPointsOwed(10000, 1.0f, 255, 0) == kMaxSkillPointBonus, "clamped to 1000 per level-up");
-        Check(SkillPointsOwed(10000, 1.0f, 255, 1000) == kMaxSkillPointBonus, "remainder paid later");
-        Check(SkillPointsOwed(UINT32_MAX, 5.0f, std::numeric_limits<std::int64_t>::max(), 0) == kMaxSkillPointBonus,
-            "huge inputs do not overflow");
+        // A bad setting never reduces XP.
+        Check(XPMultiplier(10, 0.0f) == 1.0f, "zero percent");
+        Check(XPMultiplier(10, -0.1f) == 1.0f, "negative percent");
+        Check(XPMultiplier(10, std::numeric_limits<float>::quiet_NaN()) == 1.0f, "NaN percent");
+        Check(XPMultiplier(10, std::numeric_limits<float>::infinity()) == 1.0f, "infinite percent");
+        const auto huge = XPMultiplier(UINT32_MAX, std::numeric_limits<float>::max());
+        Check(std::isfinite(huge) && huge > 1.0f, "huge inputs stay finite");
     }
 
     void TestBarter()

@@ -12,7 +12,7 @@ points on them; each point gives one bonus:
 | Strength | +% of base Stamina | `stamina_percent` | 0.05 (5%) |
 | Resilience | +% of base Health | `health_percent` | 0.05 (5%) |
 | Agility | +Critical hit chance, as the CriticalChance actor value | `critical_chance` | 1 (= +1%) |
-| Intelligence | Extra SAL skill points per level, retroactive (SAL API V3) | `intelligence_skill_points` | 0.25 |
+| Intelligence | +% XP on every SAL XP award (SAL API V4) | `intelligence_xp_percent` | 0.10 (10 points = 2x XP) |
 | Wisdom | +% of base Magicka | `magicka_percent` | 0.05 (5%) |
 | Charisma | Better buy and sell prices (fBarterMin/fBarterMax) | `charisma_price_improvement` | 0.01 per point |
 
@@ -44,6 +44,9 @@ is reference only: never edit it from here.
 - Phase 5 (done): Agility (CriticalChance actor value) and Charisma (barter game
   settings). All six traits now have an effect. Verified in game except the items in
   "Deferred in-game checks".
+- Phase 6 (built, not yet tested in game): Intelligence multiplies SAL XP awards (SAL API
+  V4) instead of granting skill points, so a future temporary trait bonus only affects XP
+  earned while it lasts. Skill points granted by the old Intelligence stay.
 
 ## Architecture
 
@@ -62,7 +65,7 @@ SKSEPluginLoad()
 │   ├── kDataLoaded               - SALBridge::Finalize(): still pending -> Missing;
 │   │                               TraitState::CaptureGameSettings() (barter originals);
 │   │                               DiagnosticSinks::Register(); TraitMenu::Register()
-│   │                               (menu + SAL level-up step); SAL skill point bonus
+│   │                               (menu + SAL level-up step); SAL XP multiplier
 │   │                               (Intelligence); SettingsPage::Register();
 │   │                               DebugPage::Register()
 │   ├── kPreLoadGame              - TraitMenu::ResetState()
@@ -161,12 +164,18 @@ never stored.
   mod changed them, so ST logs a warning and adopts them as the new originals. Revert
   (main menu, new game, before a load) writes the originals back. The reconcile after
   `kPostLoadGame` applies the loaded character's Charisma.
-- **Intelligence** (SAL API V3 `RegisterSkillPointBonus`): SAL calls
-  `TraitState::TakeSkillPointBonus(level)` exactly once per level-up, after ST's trait menu.
-  It returns `floor(points * intelligence_skill_points * (level - 1)) - granted` (at least
-  0, at most 1000) and adds it to `skillPointsGranted` in the cosave, so Intelligence is
-  retroactive over every level-up and never takes points back. Lowering SAL's own points
-  per level is SAL's `skill_allocation.points_per_level`.
+- **Intelligence** (SAL API V4 `RegisterXPMultiplier`, `docs/SAL_API_V4.md`): SAL calls
+  `TraitState::XPMultiplier(sourceCategory)` on every XP award and multiplies the award by
+  `TraitRules::XPMultiplier = 1 + points * intelligence_xp_percent` (linear, uncapped; 1.0
+  for a bad setting). The value is published to an atomic whenever the allocation or
+  settings change (commit, load, revert, new game, settings), so the per-award call never
+  takes ST's mutex. The source category is ignored for now. Nothing is granted or stored;
+  SAL keeps XP as a float, so small bonuses accumulate even when the notification rounds.
+  Design rule for future temporary trait bonuses (potions, gear): every effect is a live
+  value computed from the trait's effective points, never a one-time grant; only the
+  greatest temporary bonus will count, no hard cap. The old V3 skill point bonus is no
+  longer registered; `skillPointsGranted` in the cosave is legacy, read and written back
+  unchanged.
 - The engine stores the permanent modifier in the main save, so after a load the bonus is
   already present and the reconcile delta is 0 unless settings changed.
 - **Spend** (`SpendPoint`, main thread): +1 on a trait when `ValidateAllocation` allows it,
@@ -180,7 +189,7 @@ Known limits: if the cosave is lost while the main save keeps ST's modifiers, ST
 ### Cosave
 
 - Unique ID `SMTR`, record `TRTS`, version 2 (`TraitSave`, pure codec, portable tests).
-- Payload, little-endian: `uint32 allocation[6]`, `uint32 skillPointsGranted`,
+- Payload, little-endian: `uint32 allocation[6]`, `uint32 skillPointsGranted` (legacy),
   `uint32 count` (max 8), then `count` x `{ uint32 RE::ActorValue id, float32 applied }`.
   v2 writes Stamina, Health, Magicka and CriticalChance (33). v1 records (no
   `skillPointsGranted`) and v2 records without the CriticalChance entry still load.
@@ -218,7 +227,7 @@ button per trait. Rendering may run off the main thread: the page reads
 | `src/main.cpp` | Plugin entry, log init and rotation, SKSE messaging |
 | `src/Config.cpp` / `include/Config.h` | Reads both JSON files next to the DLL, fills `Config::traits` |
 | `src/SettingsModel.cpp` / `include/SettingsModel.h` | Fixed registry with bounds and built-in defaults, layering, schema version, per-value validation |
-| `src/TraitRules.cpp` / `include/TraitRules.h` | Pure rules: points, allocation validation, bonuses, reconcile delta, Intelligence multiplier, barter adjustment |
+| `src/TraitRules.cpp` / `include/TraitRules.h` | Pure rules: points, allocation validation, bonuses, reconcile delta, Intelligence XP multiplier, barter adjustment |
 | `src/TraitSave.cpp` / `include/TraitSave.h` | Pure cosave codec: encode, decode with validation, first-valid adoption |
 | `src/TraitState.cpp` / `include/TraitState.h` | Allocations and applied bonuses, cosave callbacks, reconcile, spend, snapshots |
 | `src/TraitMenuRules.cpp` / `include/TraitMenuRules.h` | Pure menu session (preview/commit) and the exactly-once continuation guard |
@@ -227,7 +236,8 @@ button per trait. Rendering may run off the main thread: the page reads
 | `data/Interface/Translations/SimpleTraits_ENGLISH.txt` | Menu text (UTF-16 LE), generated by `tools/generate_translation.py` |
 | `docs/SAL_API_V2.md` | The SAL API V2 request (pre-skill-menu step), implemented in SAL `817e418` |
 | `src/SettingsPage.cpp` / `include/SettingsPage.h` | Settings page in SKSE Menu Framework |
-| `docs/SAL_API_V3.md` | The SAL API V3 request (skill point bonus), implemented in SAL `d53dc5b` |
+| `docs/SAL_API_V3.md` | The SAL API V3 request (skill point bonus), implemented in SAL `d53dc5b`; no longer used |
+| `docs/SAL_API_V4.md` | The SAL API V4 request (XP multiplier), implemented in SAL `6933938` |
 | `src/DebugPage.cpp` / `include/DebugPage.h` | Temporary SKSE Menu Framework page for spending points |
 | `extern/SKSEMenuFramework/SKSEMenuFramework.h` | Vendored MIT header (via SAL `751ebcd`, upstream `aa8effa`); runtime-resolved, no link dependency |
 | `src/HandshakeRules.cpp` / `include/HandshakeRules.h` | Pure SAL interface message validation |
@@ -263,7 +273,7 @@ by the portable tests on any OS.
 | `points.levels_per_point` | int | 1-100 | 3 |
 | `per_point.stamina_percent` / `health_percent` / `magicka_percent` | number | 0-1 | 0.05 |
 | `per_point.critical_chance` | number | 0-10 | 1 |
-| `per_point.intelligence_skill_points` | number | 0-5 | 0.25 |
+| `per_point.intelligence_xp_percent` | number | 0-0.5 (two decimals on the page) | 0.10 |
 | `per_point.charisma_price_improvement` | number | 0-0.05 | 0.01 |
 
 All of these are editable on the settings page.
@@ -316,6 +326,11 @@ session: no double bonus, base values untouched). Still to run at the end of dev
   whether the buy formula differs from UESP's or the first trade differed.
 - Agility crit rate end to end (critical_chance 10 with 1 point -> CriticalChance 100,
   confirmed via getav; the observed rate should be ~10%).
+- Intelligence XP (Phase 6, needs SAL `6933938` or later): the ST log shows "XP multiplier
+  registered"; with 10 points (or 1 point at 0.50) SAL's XP Log shows "x2.00 from other
+  mods" and a kill or quest gives double the XP; spending a point or changing the setting
+  takes effect on the next award; the trait menu shows "+10% XP per point". A save made with
+  the old Intelligence keeps its skill points and loads without errors.
 
 ## Build
 

@@ -49,7 +49,7 @@ int main(int argc, char** argv)
     assert(e["per_point"]["health_percent"].get<float>() == defaults.healthPercent);
     assert(e["per_point"]["magicka_percent"].get<float>() == defaults.magickaPercent);
     assert(e["per_point"]["critical_chance"].get<float>() == defaults.criticalChancePerPoint);
-    assert(e["per_point"]["intelligence_skill_points"].get<float>() == defaults.intelligenceSkillPoints);
+    assert(e["per_point"]["intelligence_xp_percent"].get<float>() == defaults.intelligenceXPPercent);
     assert(e["per_point"]["charisma_price_improvement"].get<float>() == defaults.charismaPriceImprovement);
     assert(e["config_version"] == SettingsModel::kSchemaVersion);
 
@@ -59,7 +59,7 @@ int main(int argc, char** argv)
         { "config_version", 1 },
         { "points", { { "starting_points", 7 }, { "levels_per_point", 0 } } },
         { "per_point", { { "stamina_percent", 0.125 }, { "health_percent", "bad" }, { "critical_chance", 11.0 },
-                         { "intelligence_skill_points", 0.5 } } },
+                         { "intelligence_xp_percent", 0.25 }, { "intelligence_skill_points", 0.5 } } },
         { "typo_section", { { "x", 1 } } },
         { "_comment", "ignored" }
     };
@@ -69,13 +69,24 @@ int main(int argc, char** argv)
     assert(model.Effective()["per_point"]["stamina_percent"] == 0.125);
     assert(model.Effective()["per_point"]["health_percent"] == shipped["per_point"]["health_percent"]);
     assert(model.Effective()["per_point"]["critical_chance"] == shipped["per_point"]["critical_chance"]);
-    assert(model.Effective()["per_point"]["intelligence_skill_points"] == 0.5);
+    assert(model.Effective()["per_point"]["intelligence_xp_percent"] == 0.25);
+    assert(!SettingsModel::Value(model.Effective(), "per_point.intelligence_skill_points"));
     assert(HasWarning(warnings, "points.levels_per_point"));
     assert(HasWarning(warnings, "per_point.health_percent"));
     assert(HasWarning(warnings, "per_point.critical_chance"));
     assert(HasWarning(warnings, "unknown override ignored: typo_section.x"));
+    assert(HasWarning(warnings, "retired setting ignored: per_point.intelligence_skill_points"));
+    assert(!HasWarning(warnings, "unknown override ignored: per_point.intelligence_skill_points"));
     assert(!HasWarning(warnings, "_comment"));
-    assert(warnings.size() == 4);
+    assert(warnings.size() == 5);
+
+    // Intelligence: 0-0.5 per point, two decimals on the settings page.
+    const auto* intelligence = SettingsModel::Find("per_point.intelligence_xp_percent");
+    assert(intelligence && intelligence->decimals == 2);
+    assert(SettingsModel::Valid(*intelligence, Json(0.0)));
+    assert(SettingsModel::Valid(*intelligence, Json(0.5)));
+    assert(!SettingsModel::Valid(*intelligence, Json(0.51)));
+    assert(!SettingsModel::Valid(*intelligence, Json(-0.01)));
 
     // Integers: integral doubles are accepted and stored as integers.
     assert(model.Load(shipped, { { "points", { { "starting_points", 6.0 } } } }));

@@ -43,7 +43,7 @@ namespace ST::TraitMenu {
             std::array<std::string, TraitRules::kTraitCount> effects{
                 "+{value}% of base Stamina per point", "+{value}% of base Health per point",
                 "+{value}% critical hit chance per point",
-                "+{value} skill points per level per point, retroactive", "+{value}% of base Magicka per point",
+                "+{value}% XP per point", "+{value}% of base Magicka per point",
                 "{value}% better buy and sell prices per point"
             };
         };
@@ -103,10 +103,10 @@ namespace ST::TraitMenu {
                 case Trait::kAgility: perPoint = Config::traits.criticalChancePerPoint; break;
                 case Trait::kCharisma: perPoint = Config::traits.charismaPriceImprovement * 100.0f; break;
                 case Trait::kIntelligence:
-                    if (!SALBridge::HasSkillPointBonus()) {
-                        return s_text.inactive;  // needs SAL API V3
+                    if (!SALBridge::HasXPMultiplier()) {
+                        return s_text.inactive;  // needs SAL API V4
                     }
-                    perPoint = Config::traits.intelligenceSkillPoints;
+                    perPoint = Config::traits.intelligenceXPPercent * 100.0f;
                     break;
             }
             auto text = s_text.effects[trait];

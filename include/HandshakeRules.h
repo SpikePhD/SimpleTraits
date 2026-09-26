@@ -27,8 +27,8 @@ namespace ST::HandshakeRules {
     // RegisterPreSkillMenuStep. Otherwise ST uses the V1 level-up step.
     [[nodiscard]] bool HasPreSkillMenuStep(const void* data, std::uint32_t dataLen) noexcept;
 
-    // For an accepted message: true when it is a V3 interface (version >= 3,
-    // payload at least sizeof(SALInterfaceV3)) with a non-null
-    // RegisterSkillPointBonus. Without it Intelligence has no effect.
-    [[nodiscard]] bool HasSkillPointBonus(const void* data, std::uint32_t dataLen) noexcept;
+    // For an accepted message: true when it is a V4 interface (version >= 4,
+    // payload at least sizeof(SALInterfaceV4)) with a non-null
+    // RegisterXPMultiplier. Without it Intelligence has no effect.
+    [[nodiscard]] bool HasXPMultiplier(const void* data, std::uint32_t dataLen) noexcept;
 }
